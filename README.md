@@ -1,19 +1,40 @@
 # vslsp - C# LSP Diagnostics Tool
 
-A Bun-compatible CLI tool that connects to OmniSharp LSP server to fetch C# diagnostics (errors, warnings, compile status) for .NET solutions. Designed for AI agent consumption via the Skill framework.
+A CLI tool that connects to OmniSharp LSP server to fetch C# diagnostics (errors, warnings, compile status) for .NET solutions. Designed for AI agent consumption.
 
-## Installation
+## Quick Install
 
 ```bash
-bun install
+curl -fsSL https://raw.githubusercontent.com/dyallo/vslsp/main/install.sh | bash
 ```
 
-This will automatically download the OmniSharp binary for your platform.
+This single command:
+1. Detects your platform (Linux/macOS, x64/arm64)
+2. Downloads the latest `vslsp` binary
+3. Downloads OmniSharp v1.39.11
+4. Installs to `~/.local/share/vslsp/`
+5. Creates a symlink at `~/.local/bin/vslsp`
+
+### What Gets Installed
+
+| Path | Description |
+|------|-------------|
+| `~/.local/share/vslsp/vslsp` | Main binary |
+| `~/.local/share/vslsp/omnisharp/` | OmniSharp LSP server |
+| `~/.local/bin/vslsp` | Symlink for PATH access |
+
+### PATH Setup
+
+If `~/.local/bin` is not in your PATH, add this to your shell profile:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
 
 ## Usage
 
 ```bash
-bun run vslsp.ts --solution /path/to/MySolution.sln
+vslsp --solution /path/to/MySolution.sln
 ```
 
 ### Options
@@ -24,20 +45,20 @@ bun run vslsp.ts --solution /path/to/MySolution.sln
 | `--timeout, -t` | Maximum wait time in ms | 30000 |
 | `--quiet-period` | Time after last diagnostic to wait | 3000 |
 | `--format, -f` | Output format: `compact` or `pretty` | compact |
-| `--omnisharp` | Path to OmniSharp binary | ./omnisharp/OmniSharp |
+| `--omnisharp` | Path to OmniSharp binary | ~/.local/share/vslsp/omnisharp/OmniSharp |
 | `--help, -h` | Show help | - |
 
 ### Examples
 
 ```bash
 # Basic usage
-bun run vslsp.ts --solution ./MyProject.sln
+vslsp --solution ./MyProject.sln
 
 # Pretty-printed output with longer timeout
-bun run vslsp.ts --solution ./MyProject.sln --format pretty --timeout 60000
+vslsp --solution ./MyProject.sln --format pretty --timeout 60000
 
 # Using custom OmniSharp path
-bun run vslsp.ts --solution ./MyProject.sln --omnisharp /usr/local/bin/OmniSharp
+vslsp --solution ./MyProject.sln --omnisharp /usr/local/bin/OmniSharp
 ```
 
 ## Output Format
@@ -81,31 +102,26 @@ JSON output to stdout:
 - `0` - No errors (clean build)
 - `1` - Errors found or execution failure
 
-## AI Agent Integration
-
-This tool is designed for AI agents (like GitHub Copilot or Claude) to check C# code health. Example skill invocation:
-
-```bash
-# Check for errors before making changes
-bun run vslsp.ts --solution ./MyProject.sln
-
-# Parse JSON output to determine if build is clean
-# Use summary.errors to count compilation errors
-```
-
-## Manual OmniSharp Setup
-
-If automatic download fails, manually download from [OmniSharp releases](https://github.com/OmniSharp/omnisharp-roslyn/releases):
-
-1. Download the appropriate archive for your platform (e.g., `omnisharp-linux-x64-net6.0.tar.gz`)
-2. Extract to `./omnisharp/`
-3. Ensure the binary is executable: `chmod +x ./omnisharp/OmniSharp`
-
 ## Requirements
 
-- [Bun](https://bun.sh/) runtime
 - .NET 6.0+ runtime (for OmniSharp)
-- Valid .NET solution file
+- `curl` or `wget` (for installation)
+- Linux (x64/arm64) or macOS (x64/arm64)
+
+## Manual Installation
+
+If the install script fails, you can manually install:
+
+1. Download the binary for your platform from [releases](https://github.com/dyallo/vslsp/releases)
+2. Download OmniSharp from [OmniSharp releases](https://github.com/OmniSharp/omnisharp-roslyn/releases) (e.g., `omnisharp-linux-x64-net6.0.tar.gz`)
+3. Extract both to your preferred location
+4. Run with `--omnisharp` flag pointing to the OmniSharp binary
+
+## Uninstall
+
+```bash
+rm -rf ~/.local/share/vslsp ~/.local/bin/vslsp
+```
 
 ## License
 
