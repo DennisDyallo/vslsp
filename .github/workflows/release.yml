@@ -19,7 +19,7 @@ jobs:
           - os: ubuntu-24.04-arm
             target: bun-linux-arm64
             suffix: linux-arm64
-          - os: macos-13
+          - os: macos-latest
             target: bun-darwin-x64
             suffix: darwin-x64
           - os: macos-latest
@@ -68,9 +68,6 @@ jobs:
           - os: ubuntu-24.04-arm
             rid: linux-arm64
             suffix: linux-arm64
-          - os: macos-13
-            rid: osx-x64
-            suffix: darwin-x64
           - os: macos-latest
             rid: osx-arm64
             suffix: darwin-arm64
