@@ -282,7 +282,7 @@ server.registerTool(
   async ({ file, content, port }) => {
     try {
       const result = await notify({ port, file, content });
-      return ok(result);
+      return ok({ ...result });
     } catch (e) {
       return err(e instanceof Error ? e.message : String(e));
     }
