@@ -3,7 +3,7 @@ set -euo pipefail
 
 # vslsp installer - Downloads compiled binary and OmniSharp
 
-REPO="dyallo/vslsp"  # Update with actual repo
+REPO="DennisDyallo/vslsp"
 OMNISHARP_VERSION="v1.39.11"
 INSTALL_DIR="$HOME/.local/share/vslsp"
 BIN_DIR="$HOME/.local/bin"
@@ -89,6 +89,19 @@ download_vslsp() {
     info "vslsp binary installed to $INSTALL_DIR/vslsp"
 }
 
+# Download vslsp-mcp binary
+download_vslsp_mcp() {
+    local platform="$1" version="$2"
+    local binary_name="vslsp-mcp-${platform}"
+    local url="https://github.com/${REPO}/releases/download/${version}/${binary_name}"
+
+    info "Downloading vslsp-mcp ${version} for ${platform}..."
+    mkdir -p "$INSTALL_DIR"
+    download "$url" "$INSTALL_DIR/vslsp-mcp"
+    chmod +x "$INSTALL_DIR/vslsp-mcp"
+    info "vslsp-mcp binary installed to $INSTALL_DIR/vslsp-mcp"
+}
+
 # Download OmniSharp
 download_omnisharp() {
     local platform="$1"
@@ -151,6 +164,16 @@ create_symlink() {
     ln -s "$INSTALL_DIR/vslsp" "$BIN_DIR/vslsp"
     info "Created symlink: $BIN_DIR/vslsp -> $INSTALL_DIR/vslsp"
 
+    # vslsp-mcp symlink
+    if [[ -L "$BIN_DIR/vslsp-mcp" ]]; then
+        rm "$BIN_DIR/vslsp-mcp"
+    elif [[ -e "$BIN_DIR/vslsp-mcp" ]]; then
+        mv "$BIN_DIR/vslsp-mcp" "$BIN_DIR/vslsp-mcp.bak"
+    fi
+
+    ln -s "$INSTALL_DIR/vslsp-mcp" "$BIN_DIR/vslsp-mcp"
+    info "Created symlink: $BIN_DIR/vslsp-mcp -> $INSTALL_DIR/vslsp-mcp"
+
     # Check if ~/.local/bin is in PATH
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         warn "$BIN_DIR is not in your PATH"
@@ -191,6 +214,7 @@ main() {
     info "Latest version: $version"
 
     download_vslsp "$platform" "$version"
+    download_vslsp_mcp "$platform" "$version"
     download_omnisharp "$platform"
     download_code_mapper "$platform" "$version"
     create_symlink

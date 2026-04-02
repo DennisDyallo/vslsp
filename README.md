@@ -9,7 +9,7 @@ A unified CLI and MCP server for AI agents working on C# codebases. Provides com
 ## Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dyallo/vslsp/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh | bash
 ```
 
 ### What Gets Installed

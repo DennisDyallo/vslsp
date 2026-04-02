@@ -9,22 +9,22 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-bun:
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             target: bun-linux-x64
-            artifact: vslsp-linux-x64
+            suffix: linux-x64
           - os: ubuntu-latest
             target: bun-linux-arm64
-            artifact: vslsp-linux-arm64
+            suffix: linux-arm64
           - os: macos-latest
             target: bun-darwin-x64
-            artifact: vslsp-darwin-x64
+            suffix: darwin-x64
           - os: macos-latest
             target: bun-darwin-arm64
-            artifact: vslsp-darwin-arm64
+            suffix: darwin-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -40,18 +40,71 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build binary
+      - name: Build vslsp binary
+        run: bun build --compile --minify --target=${{ matrix.target }} vslsp.ts --outfile vslsp-${{ matrix.suffix }}
+
+      - name: Build vslsp-mcp binary
+        run: bun build --compile --minify --target=${{ matrix.target }} mcp.ts --outfile vslsp-mcp-${{ matrix.suffix }}
+
+      - name: Upload vslsp artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vslsp-${{ matrix.suffix }}
+          path: vslsp-${{ matrix.suffix }}
+
+      - name: Upload vslsp-mcp artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vslsp-mcp-${{ matrix.suffix }}
+          path: vslsp-mcp-${{ matrix.suffix }}
+
+  build-codemapper:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            suffix: linux-x64
+          - os: ubuntu-latest
+            rid: linux-arm64
+            suffix: linux-arm64
+          - os: macos-latest
+            rid: osx-x64
+            suffix: darwin-x64
+          - os: macos-latest
+            rid: osx-arm64
+            suffix: darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build CodeMapper
         run: |
-          bun build --compile --minify --target=${{ matrix.target }} vslsp.ts --outfile ${{ matrix.artifact }}
+          dotnet publish tools/code-mapper/CodeMapper.csproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            -p:PublishSingleFile=true \
+            -p:PublishTrimmed=true \
+            --self-contained true \
+            -o publish
+          mv publish/CodeMapper CodeMapper-${{ matrix.suffix }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          name: CodeMapper-${{ matrix.suffix }}
+          path: CodeMapper-${{ matrix.suffix }}
 
   release:
-    needs: build
+    needs: [build-bun, build-codemapper]
     runs-on: ubuntu-latest
 
     steps:
