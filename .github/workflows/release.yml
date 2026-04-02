@@ -100,8 +100,61 @@ jobs:
           name: CodeMapper-${{ matrix.suffix }}
           path: CodeMapper-${{ matrix.suffix }}
 
+  build-rust-mapper:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            suffix: linux-x64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            suffix: linux-arm64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            suffix: darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools (Linux)
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get install -y musl-tools
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/rust-mapper/target
+          key: rust-mapper-${{ matrix.target }}-${{ hashFiles('tools/rust-mapper/Cargo.lock') }}
+          restore-keys: rust-mapper-${{ matrix.target }}-
+
+      - name: Build RustMapper
+        run: |
+          cargo build --release \
+            --manifest-path tools/rust-mapper/Cargo.toml \
+            --target ${{ matrix.target }}
+          cp tools/rust-mapper/target/${{ matrix.target }}/release/rust-mapper \
+             RustMapper-${{ matrix.suffix }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: RustMapper-${{ matrix.suffix }}
+          path: RustMapper-${{ matrix.suffix }}
+
   release:
-    needs: [build-bun, build-codemapper]
+    needs: [build-bun, build-codemapper, build-rust-mapper]
     runs-on: ubuntu-24.04
 
     steps:
