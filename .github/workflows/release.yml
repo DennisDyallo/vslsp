@@ -13,13 +13,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: bun-linux-x64
             suffix: linux-x64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: bun-linux-arm64
             suffix: linux-arm64
-          - os: macos-latest
+          - os: macos-13
             target: bun-darwin-x64
             suffix: darwin-x64
           - os: macos-latest
@@ -62,13 +62,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             rid: linux-x64
             suffix: linux-x64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             rid: linux-arm64
             suffix: linux-arm64
-          - os: macos-latest
+          - os: macos-13
             rid: osx-x64
             suffix: darwin-x64
           - os: macos-latest
@@ -105,7 +105,7 @@ jobs:
 
   release:
     needs: [build-bun, build-codemapper]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Download all artifacts
