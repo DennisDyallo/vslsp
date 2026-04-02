@@ -1,6 +1,6 @@
 import type { Server } from "bun";
-import type { LSPClient } from "./lsp-client";
-import type { DiagnosticsStore } from "./diagnostics-store";
+import type { LSPClient } from "../core/lsp-client";
+import type { DiagnosticsStore } from "./store";
 import { existsSync, readFileSync } from "fs";
 
 export interface HttpServerOptions {

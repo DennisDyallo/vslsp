@@ -25,5 +25,16 @@ jobs:
       - name: Type check
         run: bun run tsc --noEmit
 
-      - name: Build binary
+      - name: Build vslsp binary
         run: bun build --compile --minify vslsp.ts --outfile vslsp
+
+      - name: Build vslsp-mcp binary
+        run: bun build --compile --minify mcp.ts --outfile vslsp-mcp
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build CodeMapper
+        run: dotnet publish tools/code-mapper/CodeMapper.csproj -c Release -o tools/code-mapper/publish

@@ -35,3 +35,15 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # OmniSharp binary
 omnisharp/
+
+# Compiled binaries
+vslsp-bin
+vslsp-mcp
+
+# CodeMapper build artifacts
+tools/code-mapper/bin/
+tools/code-mapper/obj/
+tools/code-mapper/publish/
+
+# CodeMapper output
+codebase_ast/

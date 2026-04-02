@@ -123,6 +123,20 @@ download_omnisharp() {
     info "OmniSharp installed to $omnisharp_dir/OmniSharp"
 }
 
+# Download CodeMapper
+download_code_mapper() {
+    local platform="$1" version="$2"
+    local binary_name="CodeMapper-${platform}"
+    local url="https://github.com/${REPO}/releases/download/${version}/${binary_name}"
+    local code_mapper_dir="$INSTALL_DIR/code-mapper"
+
+    info "Downloading CodeMapper for ${platform}..."
+    mkdir -p "$code_mapper_dir"
+    download "$url" "$code_mapper_dir/CodeMapper"
+    chmod +x "$code_mapper_dir/CodeMapper"
+    info "CodeMapper installed to $code_mapper_dir/CodeMapper"
+}
+
 # Create symlink in ~/.local/bin
 create_symlink() {
     mkdir -p "$BIN_DIR"
@@ -178,6 +192,7 @@ main() {
 
     download_vslsp "$platform" "$version"
     download_omnisharp "$platform"
+    download_code_mapper "$platform" "$version"
     create_symlink
     verify_install
 

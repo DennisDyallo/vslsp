@@ -1,8 +1,8 @@
 import { existsSync } from "fs";
 import { resolve, dirname } from "path";
-import { LSPClient } from "../lsp-client";
-import { DiagnosticsStore } from "../diagnostics-store";
-import { createHttpServer } from "../http-server";
+import { LSPClient } from "../core/lsp-client";
+import { DiagnosticsStore } from "./store";
+import { createHttpServer } from "./http";
 
 interface ServeOptions {
   solution: string;
@@ -12,7 +12,7 @@ interface ServeOptions {
 
 export async function serve(options: ServeOptions): Promise<void> {
   const solutionPath = resolve(options.solution);
-  
+
   if (!existsSync(solutionPath)) {
     throw new Error(`Solution file not found: ${solutionPath}`);
   }
@@ -33,7 +33,7 @@ export async function serve(options: ServeOptions): Promise<void> {
   console.error(`[vslsp] OmniSharp: ${omnisharpPath}`);
 
   const store = new DiagnosticsStore(solutionPath);
-  
+
   const client = new LSPClient({
     solutionPath,
     omnisharpPath,
@@ -44,10 +44,6 @@ export async function serve(options: ServeOptions): Promise<void> {
   // Wire up diagnostics handler
   client.onDiagnostics((params) => {
     store.handleDiagnostics(params);
-    if (!client.isReady) {
-      // Mark ready after receiving first diagnostics
-      // Give it a bit more time for initial batch
-    }
   });
 
   // Start OmniSharp
@@ -63,12 +59,12 @@ export async function serve(options: ServeOptions): Promise<void> {
     const check = setInterval(() => {
       const elapsed = Date.now() - startTime;
       const timeSinceUpdate = Date.now() - store.getLastUpdate();
-      
+
       if (elapsed >= MIN_WAIT && timeSinceUpdate >= QUIET_PERIOD) {
         clearInterval(check);
         resolve();
       }
-      
+
       // Max wait of 60s for initial load
       if (elapsed >= 60000) {
         clearInterval(check);
@@ -83,18 +79,18 @@ export async function serve(options: ServeOptions): Promise<void> {
   // Start recursive file watcher for .cs files in solution directory
   const solutionDir = dirname(solutionPath);
   const recentlyChanged = new Map<string, number>(); // Debounce with timestamps
-  
+
   // Use fs.watch with recursive: true - works on Linux with Bun
   const { watch, existsSync: fsExists, statSync } = require("fs");
   const { join, dirname: pathDirname, basename } = require("path");
-  
+
   console.error(`[vslsp] Setting up watcher on: ${solutionDir}`);
-  
+
   const watcher = watch(solutionDir, { recursive: true }, (event: string, relativePath: string | null) => {
     if (!relativePath) return;
-    
+
     const fullPath = join(solutionDir, relativePath);
-    
+
     // For .cs files, handle directly
     if (relativePath.endsWith(".cs")) {
       // Debounce - ignore changes within 500ms for same file
@@ -102,23 +98,23 @@ export async function serve(options: ServeOptions): Promise<void> {
       const lastChange = recentlyChanged.get(fullPath) || 0;
       if (now - lastChange < 500) return;
       recentlyChanged.set(fullPath, now);
-      
+
       // Check if file exists (events fire for deletes too)
       if (!fsExists(fullPath)) return;
-      
+
       console.error(`[vslsp] File changed: ${fullPath}`);
       client.didSave(fullPath).catch((err) => {
         console.error(`[vslsp] Error notifying change: ${err}`);
       });
       return;
     }
-    
+
     // For rename events on non-.cs files (like sed temp files), check if any
     // .cs file in that directory was just modified (atomic write detection)
     if (event === "rename") {
       const dir = join(solutionDir, pathDirname(relativePath));
       const tempBasename = basename(relativePath);
-      
+
       // Only check if it looks like a temp file (sed uses sedXXXXXX pattern)
       if (tempBasename.startsWith("sed") || tempBasename.startsWith(".") || tempBasename.includes("~")) {
         // Find .cs files in this directory modified in last 2 seconds
@@ -126,7 +122,7 @@ export async function serve(options: ServeOptions): Promise<void> {
           const { readdirSync } = require("fs");
           const files = readdirSync(dir);
           const now = Date.now();
-          
+
           for (const file of files) {
             if (!file.endsWith(".cs")) continue;
             const csPath = join(dir, file);
@@ -138,7 +134,7 @@ export async function serve(options: ServeOptions): Promise<void> {
                 const lastChange = recentlyChanged.get(csPath) || 0;
                 if (now - lastChange < 500) continue;
                 recentlyChanged.set(csPath, now);
-                
+
                 console.error(`[vslsp] File changed (atomic write): ${csPath}`);
                 client.didSave(csPath).catch((err) => {
                   console.error(`[vslsp] Error notifying change: ${err}`);
@@ -154,11 +150,11 @@ export async function serve(options: ServeOptions): Promise<void> {
       }
     }
   });
-  
+
   watcher.on('error', (err: Error) => {
     console.error(`[vslsp] Watcher error: ${err.message}`);
   });
-  
+
   console.error(`[vslsp] Watching ${solutionDir} recursively for .cs file changes`);
 
   // Start HTTP server

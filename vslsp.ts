@@ -1,13 +1,11 @@
 #!/usr/bin/env bun
-import { DiagnosticsCollector } from "./src/diagnostics";
-import { serve } from "./src/commands/serve";
-import { query, status } from "./src/commands/query";
-import { notify } from "./src/commands/notify";
+import { DiagnosticsCollector } from "./src/diagnostics/collector";
+import { serve } from "./src/diagnostics/daemon";
+import { query, status, notify } from "./src/diagnostics/client";
+import { map } from "./src/code-mapping/mapper";
+import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CODE_MAPPER } from "./src/core/defaults";
 import { existsSync } from "fs";
-import { resolve, join } from "path";
-
-const DEFAULT_PORT = 7850;
-const DEFAULT_OMNISHARP = join(process.env.HOME || "~", ".local", "share", "vslsp", "omnisharp", "OmniSharp");
+import { resolve } from "path";
 
 const HELP = `
 vslsp - C# LSP Diagnostics Tool
@@ -22,11 +20,15 @@ USAGE:
   vslsp status [--port 7850]
   vslsp notify --file <path.cs> [--port 7850]
 
+  # Code structure mapping
+  vslsp map [path] [--format text|json|yaml] [--output dir]
+
 COMMANDS:
   serve                 Start persistent daemon with HTTP API
   query                 Query diagnostics from running daemon
   status                Get daemon status
   notify                Notify daemon of file change
+  map                   Map C# code structure (classes, methods, properties)
 
 OPTIONS (one-shot mode):
   --solution <path>     Path to .sln file (required)
@@ -40,33 +42,45 @@ OPTIONS (daemon mode):
   --file <path>         Filter by file (query) or file to notify
   --summary             Return only counts (query)
 
+OPTIONS (map mode):
+  --format <type>       Output: text | json | yaml (default: json)
+  --output <dir>        Output directory (default: codebase_ast)
+  --code-mapper <path>  CodeMapper binary path
+
 EXAMPLES:
   # One-shot (existing behavior)
   vslsp --solution ./MyProject.sln
-  
+
   # Start daemon
   vslsp serve --solution ./MyProject.sln --port 7850
-  
+
   # Query daemon
   vslsp query                          # All diagnostics
   vslsp query --file src/Program.cs    # Filter by file
   vslsp query --summary                # Just counts
-  
+
   # Notify file change
   vslsp notify --file src/Program.cs
+
+  # Map code structure
+  vslsp map .                          # Current dir, JSON format
+  vslsp map ./src --format text        # Text tree format
+  vslsp map . --format json --output ./docs
 `;
 
-type Command = "serve" | "query" | "status" | "notify" | "oneshot";
+type Command = "serve" | "query" | "status" | "notify" | "map" | "oneshot";
 
 interface CLIArgs {
   command: Command;
   solution: string;
   timeout: number;
   quietPeriod: number;
-  format: "compact" | "pretty";
+  format: string;
   omnisharpPath: string;
+  codeMapperPath: string;
   port: number;
   file: string;
+  output: string;
   summary: boolean;
   help: boolean;
 }
@@ -80,8 +94,10 @@ function parseArgs(): CLIArgs {
     quietPeriod: 5000,
     format: "compact",
     omnisharpPath: DEFAULT_OMNISHARP,
+    codeMapperPath: DEFAULT_CODE_MAPPER,
     port: DEFAULT_PORT,
     file: "",
+    output: "",
     summary: false,
     help: false,
   };
@@ -89,7 +105,7 @@ function parseArgs(): CLIArgs {
   // Check for command as first arg
   const firstArg = args[0];
   if (args.length > 0 && firstArg && !firstArg.startsWith("-")) {
-    if (firstArg === "serve" || firstArg === "query" || firstArg === "status" || firstArg === "notify") {
+    if (firstArg === "serve" || firstArg === "query" || firstArg === "status" || firstArg === "notify" || firstArg === "map") {
       result.command = firstArg;
       args.shift();
     }
@@ -115,7 +131,7 @@ function parseArgs(): CLIArgs {
         break;
       case "--format":
       case "-f":
-        result.format = (nextArg || "compact") as "compact" | "pretty";
+        result.format = nextArg || "compact";
         i++;
         break;
       case "--omnisharp":
@@ -131,12 +147,26 @@ function parseArgs(): CLIArgs {
         result.file = nextArg || "";
         i++;
         break;
+      case "--output":
+        result.output = nextArg || "";
+        i++;
+        break;
+      case "--code-mapper":
+        result.codeMapperPath = nextArg || DEFAULT_CODE_MAPPER;
+        i++;
+        break;
       case "--summary":
         result.summary = true;
         break;
       case "--help":
       case "-h":
         result.help = true;
+        break;
+      default:
+        // Positional arg: for 'map' command, treat as path
+        if (arg && !arg.startsWith("-") && result.command === "map" && !result.file) {
+          result.file = arg; // reuse file field as path for map
+        }
         break;
     }
   }
@@ -211,28 +241,48 @@ async function main() {
       });
       break;
 
-    case "query":
-      await query({
+    case "query": {
+      const result = await query({
         port: args.port,
         file: args.file || undefined,
         summary: args.summary,
-        format: args.format,
       });
+      const output = args.format === "pretty"
+        ? JSON.stringify(result.data, null, 2)
+        : JSON.stringify(result.data);
+      console.log(output);
+      if (!result.clean) process.exit(1);
       break;
+    }
 
-    case "status":
-      await status(args.port);
+    case "status": {
+      const statusResult = await status(args.port);
+      console.log(JSON.stringify(statusResult, null, 2));
       break;
+    }
 
-    case "notify":
+    case "notify": {
       if (!args.file) {
         error("--file is required for notify command");
       }
-      await notify({
+      const notifyResult = await notify({
         port: args.port,
         file: args.file,
       });
+      console.log(`Notified: ${notifyResult.action} for ${notifyResult.path}`);
       break;
+    }
+
+    case "map": {
+      const mapResult = await map({
+        path: args.file || ".",
+        format: (args.format === "compact" ? "json" : args.format) as "text" | "json" | "yaml",
+        output: args.output || undefined,
+        codeMapperPath: args.codeMapperPath,
+      });
+      if (mapResult.output) console.log(mapResult.output);
+      process.exit(mapResult.exitCode);
+    }
 
     case "oneshot":
     default:
@@ -241,4 +291,10 @@ async function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  if ((err as any).code === "DAEMON_NOT_RUNNING") {
+    console.error(err.message);
+    process.exit(1);
+  }
+  throw err;
+});

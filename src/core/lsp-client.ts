@@ -45,7 +45,7 @@ export class LSPClient {
 
   async start(): Promise<void> {
     const args = ["-lsp", "-s", this.options.solutionPath];
-    
+
     this.readyPromise = new Promise((resolve) => {
       this.readyResolve = resolve;
     });
@@ -80,7 +80,7 @@ export class LSPClient {
 
     await this.initialize();
   }
-  
+
   markReady(): void {
     this._isReady = true;
     this.readyResolve?.();
@@ -120,16 +120,16 @@ export class LSPClient {
   // Text document sync methods for daemon mode
   async didOpen(uri: string, content?: string): Promise<void> {
     if (!this.connection) throw new Error("Connection not established");
-    
+
     const fileUri = uri.startsWith("file://") ? uri : `file://${uri}`;
     if (this.openDocuments.has(fileUri)) return; // Already open
-    
+
     let text = content;
     if (!text) {
       const path = uri.startsWith("file://") ? uri.slice(7) : uri;
       text = readFileSync(path, "utf-8");
     }
-    
+
     console.error(`[LSP] didOpen: ${fileUri} (${text.length} chars)`);
     this.openDocuments.set(fileUri, 1);
     await this.connection.sendNotification("textDocument/didOpen", {
@@ -144,18 +144,18 @@ export class LSPClient {
 
   async didChange(uri: string, content: string): Promise<void> {
     if (!this.connection) throw new Error("Connection not established");
-    
+
     const fileUri = uri.startsWith("file://") ? uri : `file://${uri}`;
-    
+
     // Auto-open if not already open
     if (!this.openDocuments.has(fileUri)) {
       await this.didOpen(uri, content);
       // Now send didChange with updated content
     }
-    
+
     const version = (this.openDocuments.get(fileUri) || 0) + 1;
     this.openDocuments.set(fileUri, version);
-    
+
     console.error(`[LSP] didChange: ${fileUri} v${version} (${content.length} chars)`);
     await this.connection.sendNotification("textDocument/didChange", {
       textDocument: {
@@ -168,13 +168,13 @@ export class LSPClient {
 
   async didSave(uri: string): Promise<void> {
     if (!this.connection) throw new Error("Connection not established");
-    
+
     const fileUri = uri.startsWith("file://") ? uri : `file://${uri}`;
-    
+
     // Read fresh content from disk
     const path = uri.startsWith("file://") ? uri.slice(7) : uri;
     const text = readFileSync(path, "utf-8");
-    
+
     // If file wasn't open, open it first
     if (!this.openDocuments.has(fileUri)) {
       await this.didOpen(uri, text);
@@ -196,7 +196,7 @@ export class LSPClient {
         contentChanges: [{ text }],
       });
     }
-    
+
     await this.connection.sendNotification("textDocument/didSave", {
       textDocument: { uri: fileUri },
       text,
@@ -205,10 +205,10 @@ export class LSPClient {
 
   async didClose(uri: string): Promise<void> {
     if (!this.connection) throw new Error("Connection not established");
-    
+
     const fileUri = uri.startsWith("file://") ? uri : `file://${uri}`;
     if (!this.openDocuments.has(fileUri)) return;
-    
+
     this.openDocuments.delete(fileUri);
     await this.connection.sendNotification("textDocument/didClose", {
       textDocument: { uri: fileUri },

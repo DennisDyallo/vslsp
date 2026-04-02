@@ -5,7 +5,7 @@ import {
   type FileDiagnostics,
   type DiagnosticSummary,
   diagnosticToEntry,
-} from "./types";
+} from "../core/types";
 
 export class DiagnosticsStore {
   private diagnosticsMap: Map<string, FileDiagnostics> = new Map();

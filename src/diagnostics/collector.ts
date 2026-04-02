@@ -1,12 +1,12 @@
 import type { PublishDiagnosticsParams } from "vscode-languageserver-protocol";
-import { LSPClient } from "./lsp-client";
+import { LSPClient } from "../core/lsp-client";
 import {
   type DiagnosticsResult,
   type FileDiagnostics,
   type DiagnosticSummary,
   type LSPClientOptions,
   diagnosticToEntry,
-} from "./types";
+} from "../core/types";
 import { fileURLToPath } from "url";
 
 export class DiagnosticsCollector {
@@ -35,7 +35,7 @@ export class DiagnosticsCollector {
 
   private handleDiagnostics(params: PublishDiagnosticsParams): void {
     this.lastUpdate = Date.now();
-    
+
     const uri = params.uri;
     let path: string;
     try {
@@ -59,7 +59,7 @@ export class DiagnosticsCollector {
   private async waitForCompletion(): Promise<void> {
     const startTime = Date.now();
     const MIN_WAIT = 10000; // Wait at least 10s for OmniSharp to load
-    
+
     return new Promise((resolve, reject) => {
       const checkInterval = setInterval(() => {
         const elapsed = Date.now() - startTime;
