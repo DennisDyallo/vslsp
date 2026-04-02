@@ -1,6 +1,10 @@
-# vslsp - C# LSP Diagnostics Tool
+# vslsp - C# Agent Tooling Suite
 
-A CLI tool that connects to OmniSharp LSP server to fetch C# diagnostics (errors, warnings, compile status) for .NET solutions. Designed for AI agent consumption.
+A unified CLI and MCP server for AI agents working on C# codebases. Provides comprehensive compilation diagnostics via OmniSharp LSP and code structure mapping via Roslyn AST analysis.
+
+## Why
+
+`dotnet build` only shows a few errors at a time. vslsp connects directly to OmniSharp LSP to surface ALL compilation diagnostics at once — errors, warnings, info, hints — with file paths, line numbers, and error codes. It also maps code structure (classes, methods, properties) without reading every file.
 
 ## Quick Install
 
@@ -8,85 +12,125 @@ A CLI tool that connects to OmniSharp LSP server to fetch C# diagnostics (errors
 curl -fsSL https://raw.githubusercontent.com/dyallo/vslsp/main/install.sh | bash
 ```
 
-This single command:
-1. Detects your platform (Linux/macOS, x64/arm64)
-2. Downloads the latest `vslsp` binary
-3. Downloads OmniSharp v1.39.11
-4. Installs to `~/.local/share/vslsp/`
-5. Creates a symlink at `~/.local/bin/vslsp`
-
 ### What Gets Installed
 
 | Path | Description |
 |------|-------------|
-| `~/.local/share/vslsp/vslsp` | Main binary |
+| `~/.local/share/vslsp/vslsp` | CLI binary |
+| `~/.local/share/vslsp/vslsp-mcp` | MCP server binary |
 | `~/.local/share/vslsp/omnisharp/` | OmniSharp LSP server |
-| `~/.local/bin/vslsp` | Symlink for PATH access |
+| `~/.local/share/vslsp/code-mapper/` | CodeMapper (Roslyn AST) |
+| `~/.local/bin/vslsp` | CLI symlink |
+| `~/.local/bin/vslsp-mcp` | MCP server symlink |
 
-### PATH Setup
+Add `~/.local/bin` to your PATH if not already present.
 
-If `~/.local/bin` is not in your PATH, add this to your shell profile:
+## MCP Server
 
-```bash
-export PATH="$HOME/.local/bin:$PATH"
+The MCP server exposes 7 tools over stdio for AI agent consumption:
+
+| Tool | Description |
+|------|-------------|
+| `get_diagnostics` | Get all compilation diagnostics (one-shot or daemon) |
+| `get_diagnostics_summary` | Quick error/warning/info/hint counts |
+| `get_code_structure` | Map C# code structure via Roslyn AST |
+| `start_daemon` | Start persistent daemon with file watching |
+| `get_daemon_status` | Check daemon readiness and status |
+| `notify_file_changed` | Tell daemon a file changed (disk or in-memory) |
+| `verify_changes` | Dry-run: verify proposed changes compile without writing to disk |
+
+### Setup
+
+Add to `~/.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "vslsp": {
+      "command": "~/.local/bin/vslsp-mcp",
+      "args": []
+    }
+  }
+}
 ```
 
-## Usage
+### Agent Workflow
 
-```bash
-vslsp --solution /path/to/MySolution.sln
+```
+get_code_structure ─── understand current code (Roslyn AST)
+       │
+verify_changes ─────── validate proposed edits compile (in-memory, no disk write)
+       │
+  if clean: write to disk
+       │
+notify_file_changed ── sync daemon to persisted state
+       │
+get_diagnostics ────── confirm final state
 ```
 
-### Options
+### verify_changes (Dry-Run)
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--solution, -s` | Path to .sln file (required) | - |
-| `--timeout, -t` | Maximum wait time in ms | 30000 |
-| `--quiet-period` | Time after last diagnostic to wait | 3000 |
-| `--format, -f` | Output format: `compact` or `pretty` | compact |
-| `--omnisharp` | Path to OmniSharp binary | ~/.local/share/vslsp/omnisharp/OmniSharp |
-| `--help, -h` | Show help | - |
+The standout feature: agents can verify refactorings compile cleanly before writing to disk.
 
-### Examples
+```
+Input:  { changes: [{ file: "/path/File.cs", content: "..." }] }
+Output: { summary: { errors: 0, ... }, clean: true, verified_files: [...], reverted: true }
+```
+
+The tool sends proposed content to OmniSharp via `didChange` (in-memory only), waits for re-analysis, collects diagnostics, then reverts the daemon to disk state. Supports multiple files for cross-file refactorings.
+
+## CLI Usage
+
+### One-shot Diagnostics
 
 ```bash
-# Basic usage
 vslsp --solution ./MyProject.sln
-
-# Pretty-printed output with longer timeout
 vslsp --solution ./MyProject.sln --format pretty --timeout 60000
+```
 
-# Using custom OmniSharp path
-vslsp --solution ./MyProject.sln --omnisharp /usr/local/bin/OmniSharp
+### Daemon Mode
+
+```bash
+# Start persistent daemon (watches for file changes)
+vslsp serve --solution ./MyProject.sln --port 7850
+
+# Query diagnostics
+vslsp query --port 7850
+vslsp query --file src/MyFile.cs --port 7850
+vslsp query --summary --port 7850
+
+# Check status
+vslsp status --port 7850
+
+# Notify of file change
+vslsp notify --file src/MyFile.cs --port 7850
+```
+
+### Code Structure Mapping
+
+```bash
+vslsp map ./src --format json
+vslsp map ./src --format text
 ```
 
 ## Output Format
 
-JSON output to stdout:
+All tools return structured JSON:
 
 ```json
 {
   "solution": "/path/to/solution.sln",
   "timestamp": "2026-01-25T01:10:00.000Z",
-  "summary": {
-    "errors": 2,
-    "warnings": 5,
-    "info": 0,
-    "hints": 0
-  },
+  "summary": { "errors": 2, "warnings": 5, "info": 0, "hints": 0 },
   "clean": false,
   "files": [
     {
-      "uri": "file:///path/to/File.cs",
       "path": "/path/to/File.cs",
       "diagnostics": [
         {
           "severity": "error",
           "line": 10,
           "column": 5,
-          "endLine": 10,
-          "endColumn": 15,
           "message": "; expected",
           "code": "CS1002",
           "source": "csharp"
@@ -97,30 +141,17 @@ JSON output to stdout:
 }
 ```
 
-### Exit Codes
-
-- `0` - No errors (clean build)
-- `1` - Errors found or execution failure
-
 ## Requirements
 
 - .NET 6.0+ runtime (for OmniSharp)
-- `curl` or `wget` (for installation)
-- Linux (x64/arm64) or macOS (x64/arm64)
+- Bun (for development)
 
-## Manual Installation
-
-If the install script fails, you can manually install:
-
-1. Download the binary for your platform from [releases](https://github.com/dyallo/vslsp/releases)
-2. Download OmniSharp from [OmniSharp releases](https://github.com/OmniSharp/omnisharp-roslyn/releases) (e.g., `omnisharp-linux-x64-net6.0.tar.gz`)
-3. Extract both to your preferred location
-4. Run with `--omnisharp` flag pointing to the OmniSharp binary
-
-## Uninstall
+## Development
 
 ```bash
-rm -rf ~/.local/share/vslsp ~/.local/bin/vslsp
+bun install
+bun build vslsp.ts --compile --outfile vslsp
+bun build mcp.ts --compile --outfile vslsp-mcp
 ```
 
 ## License
