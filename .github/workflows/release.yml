@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -47,13 +47,13 @@ jobs:
         run: bun build --compile --minify --target=${{ matrix.target }} mcp.ts --outfile vslsp-mcp-${{ matrix.suffix }}
 
       - name: Upload vslsp artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vslsp-${{ matrix.suffix }}
           path: vslsp-${{ matrix.suffix }}
 
       - name: Upload vslsp-mcp artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vslsp-mcp-${{ matrix.suffix }}
           path: vslsp-mcp-${{ matrix.suffix }}
@@ -76,10 +76,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '9.0.x'
 
@@ -95,7 +95,7 @@ jobs:
           mv publish/CodeMapper CodeMapper-${{ matrix.suffix }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: CodeMapper-${{ matrix.suffix }}
           path: CodeMapper-${{ matrix.suffix }}
@@ -106,7 +106,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
 

@@ -93,6 +93,16 @@ export async function status(port: number): Promise<StatusResult> {
   }
 }
 
+export async function stop(port: number): Promise<void> {
+  const baseUrl = `http://localhost:${port}`;
+  try {
+    await fetch(`${baseUrl}/stop`, { method: "POST" });
+  } catch (err) {
+    if (isConnectionError(err)) connectionError(port);
+    // Ignore other errors — process may exit before response arrives
+  }
+}
+
 export async function notify(options: NotifyOptions): Promise<NotifyResult> {
   const baseUrl = `http://localhost:${options.port}`;
   const filePath = resolve(options.file);

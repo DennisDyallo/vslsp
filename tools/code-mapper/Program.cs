@@ -14,7 +14,8 @@ class Program
         string path = Directory.GetCurrentDirectory();
         string format = "text";
         string outputDir = Path.Combine(Directory.GetCurrentDirectory(), "codebase_ast");
-        
+        bool stdoutMode = false;
+
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] is "--format" or "-f" && i + 1 < args.Length)
@@ -30,52 +31,60 @@ class Program
             {
                 outputDir = args[++i];
             }
+            else if (args[i] == "--stdout")
+            {
+                stdoutMode = true;
+            }
             else if (!args[i].StartsWith("--"))
             {
                 path = args[i];
             }
         }
-        
+
         // Find all .csproj files to auto-detect projects
         var projects = Directory.GetFiles(path, "*.csproj", SearchOption.AllDirectories)
-                                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) 
+                                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
                                          && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
                                 .ToList();
 
         if (projects.Count == 0)
         {
-            Console.WriteLine("No .csproj files found. Scanning entire directory as single project...");
+            Console.Error.WriteLine("No .csproj files found. Scanning entire directory as single project...");
             projects.Add(path);
         }
 
-        Directory.CreateDirectory(outputDir);
-        Console.WriteLine($"Found {projects.Count} project(s) in {path}");
+        if (!stdoutMode)
+        {
+            Directory.CreateDirectory(outputDir);
+            Console.WriteLine($"Found {projects.Count} project(s) in {path}");
+        }
 
         // Summary counters
         int totalProjects = 0, totalFiles = 0, totalNamespaces = 0, totalTypes = 0, totalMethods = 0;
+        var allFileNodes = new List<FileNode>(); // accumulated for stdout mode
 
         foreach (var project in projects)
         {
             string projectDir = File.Exists(project) ? Path.GetDirectoryName(project)! : project;
             string projectName = File.Exists(project) ? Path.GetFileNameWithoutExtension(project) : "codebase";
-            
+
             var files = Directory.GetFiles(projectDir, "*.cs", SearchOption.AllDirectories)
-                                 .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) 
+                                 .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
                                           && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar));
 
             var codebaseMap = new List<FileNode>();
 
             foreach (var file in files)
             {
-                try 
+                try
                 {
                     var code = File.ReadAllText(file);
                     var tree = CSharpSyntaxTree.ParseText(code);
                     var root = tree.GetRoot();
-                    
+
                     var collector = new StructureCollector(Path.GetRelativePath(projectDir, file));
                     collector.Visit(root);
-                    
+
                     if (collector.RootNode.Members.Any())
                     {
                         codebaseMap.Add(collector.RootNode);
@@ -94,27 +103,58 @@ class Program
             totalFiles += codebaseMap.Count;
             CountMembers(codebaseMap, ref totalNamespaces, ref totalTypes, ref totalMethods);
 
-            string ext = format switch { "json" => ".json", "yaml" => ".yaml", _ => ".txt" };
-            string outputPath = Path.Combine(outputDir, $"{projectName}{ext}");
+            if (stdoutMode)
+            {
+                allFileNodes.AddRange(codebaseMap);
+            }
+            else
+            {
+                string ext = format switch { "json" => ".json", "yaml" => ".yaml", _ => ".txt" };
+                string outputPath = Path.Combine(outputDir, $"{projectName}{ext}");
 
+                switch (format)
+                {
+                    case "json":
+                        WriteJsonOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
+                        break;
+                    case "yaml":
+                        WriteYamlOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
+                        break;
+                    default:
+                        WriteTextOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
+                        break;
+                }
+
+                Console.WriteLine($"  ✅ {projectName}: {codebaseMap.Count} files");
+            }
+        }
+
+        if (stdoutMode)
+        {
+            // Emit all accumulated data to stdout as a single structured document
             switch (format)
             {
                 case "json":
-                    WriteJsonOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
+                    var output = new OutputRoot
+                    {
+                        Summary = new Summary { Files = totalFiles, Namespaces = totalNamespaces, Types = totalTypes, Methods = totalMethods },
+                        FileNodes = allFileNodes
+                    };
+                    Console.WriteLine(JsonSerializer.Serialize(output, AppJsonContext.Default.OutputRoot));
                     break;
                 case "yaml":
-                    WriteYamlOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
+                    WriteYamlToWriter(Console.Out, allFileNodes, totalFiles, totalNamespaces, totalTypes, totalMethods);
                     break;
                 default:
-                    WriteTextOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
+                    WriteTextToWriter(Console.Out, allFileNodes, totalFiles, totalNamespaces, totalTypes, totalMethods);
                     break;
             }
-            
-            Console.WriteLine($"  ✅ {projectName}: {codebaseMap.Count} files");
         }
-
-        Console.WriteLine($"\n📁 Output: {outputDir}");
-        Console.WriteLine($"# Summary: {totalProjects} projects, {totalFiles} files, {totalNamespaces} namespaces, {totalTypes} types, {totalMethods} methods");
+        else
+        {
+            Console.WriteLine($"\n📁 Output: {outputDir}");
+            Console.WriteLine($"# Summary: {totalProjects} projects, {totalFiles} files, {totalNamespaces} namespaces, {totalTypes} types, {totalMethods} methods");
+        }
     }
 
     static void CountMembers(List<FileNode> files, ref int namespaces, ref int types, ref int methods)
@@ -149,16 +189,28 @@ class Program
     static void WriteTextOutput(string path, List<FileNode> files, int totalFiles, int namespaces, int types, int methods)
     {
         var sb = new StringBuilder();
+        BuildText(sb, files, totalFiles, namespaces, types, methods);
+        File.WriteAllText(path, sb.ToString());
+    }
+
+    static void WriteTextToWriter(TextWriter writer, List<FileNode> files, int totalFiles, int namespaces, int types, int methods)
+    {
+        var sb = new StringBuilder();
+        BuildText(sb, files, totalFiles, namespaces, types, methods);
+        writer.Write(sb.ToString());
+    }
+
+    static void BuildText(StringBuilder sb, List<FileNode> files, int totalFiles, int namespaces, int types, int methods)
+    {
         sb.AppendLine($"# Summary: {totalFiles} files, {namespaces} namespaces, {types} types, {methods} methods");
         sb.AppendLine();
-        
+
         foreach (var file in files)
         {
             sb.AppendLine($"# {file.FilePath}");
             WriteMembersCompact(sb, file.Members, 1);
             sb.AppendLine();
         }
-        File.WriteAllText(path, sb.ToString());
     }
     
     static void WriteMembersCompact(StringBuilder sb, List<CodeMember> members, int depth)
@@ -181,6 +233,19 @@ class Program
     static void WriteYamlOutput(string path, List<FileNode> files, int totalFiles, int namespaces, int types, int methods)
     {
         var sb = new StringBuilder();
+        BuildYaml(sb, files, totalFiles, namespaces, types, methods);
+        File.WriteAllText(path, sb.ToString());
+    }
+
+    static void WriteYamlToWriter(TextWriter writer, List<FileNode> files, int totalFiles, int namespaces, int types, int methods)
+    {
+        var sb = new StringBuilder();
+        BuildYaml(sb, files, totalFiles, namespaces, types, methods);
+        writer.Write(sb.ToString());
+    }
+
+    static void BuildYaml(StringBuilder sb, List<FileNode> files, int totalFiles, int namespaces, int types, int methods)
+    {
         sb.AppendLine("summary:");
         sb.AppendLine($"  files: {totalFiles}");
         sb.AppendLine($"  namespaces: {namespaces}");
@@ -194,7 +259,6 @@ class Program
             sb.AppendLine("    members:");
             WriteYamlMembers(sb, file.Members, 3);
         }
-        File.WriteAllText(path, sb.ToString());
     }
 
     static void WriteYamlMembers(StringBuilder sb, List<CodeMember> members, int depth)

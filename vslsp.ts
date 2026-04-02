@@ -4,6 +4,7 @@ import { serve } from "./src/diagnostics/daemon";
 import { query, status, notify } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CODE_MAPPER } from "./src/core/defaults";
+// DEFAULT_CODE_MAPPER kept for parseArgs legacy --code-mapper flag
 import { existsSync } from "fs";
 import { resolve } from "path";
 
@@ -28,7 +29,7 @@ COMMANDS:
   query                 Query diagnostics from running daemon
   status                Get daemon status
   notify                Notify daemon of file change
-  map                   Map C# code structure (classes, methods, properties)
+  map                   Map code structure (C#, Rust) via AST analysis
 
 OPTIONS (one-shot mode):
   --solution <path>     Path to .sln file (required)
@@ -45,7 +46,8 @@ OPTIONS (daemon mode):
 OPTIONS (map mode):
   --format <type>       Output: text | json | yaml (default: json)
   --output <dir>        Output directory (default: codebase_ast)
-  --code-mapper <path>  CodeMapper binary path
+  --language <lang>     Language: csharp | rust (auto-detected from extensions)
+  --code-mapper <path>  CodeMapper binary path (legacy)
 
 EXAMPLES:
   # One-shot (existing behavior)
@@ -78,6 +80,7 @@ interface CLIArgs {
   format: string;
   omnisharpPath: string;
   codeMapperPath: string;
+  language: string;
   port: number;
   file: string;
   output: string;
@@ -95,6 +98,7 @@ function parseArgs(): CLIArgs {
     format: "compact",
     omnisharpPath: DEFAULT_OMNISHARP,
     codeMapperPath: DEFAULT_CODE_MAPPER,
+    language: "",
     port: DEFAULT_PORT,
     file: "",
     output: "",
@@ -153,6 +157,10 @@ function parseArgs(): CLIArgs {
         break;
       case "--code-mapper":
         result.codeMapperPath = nextArg || DEFAULT_CODE_MAPPER;
+        i++;
+        break;
+      case "--language":
+        result.language = nextArg || "";
         i++;
         break;
       case "--summary":
@@ -279,6 +287,7 @@ async function main() {
         format: (args.format === "compact" ? "json" : args.format) as "text" | "json" | "yaml",
         output: args.output || undefined,
         codeMapperPath: args.codeMapperPath,
+        language: args.language || undefined,
       });
       if (mapResult.output) console.log(mapResult.output);
       process.exit(mapResult.exitCode);

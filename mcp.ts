@@ -5,9 +5,9 @@ import { z } from "zod";
 
 import { readFileSync } from "fs";
 import { DiagnosticsCollector } from "./src/diagnostics/collector";
-import { query, status, notify } from "./src/diagnostics/client";
+import { query, status, notify, stop } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
-import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CODE_MAPPER } from "./src/core/defaults";
+import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
 
 function ok(data: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -142,27 +142,30 @@ server.registerTool(
 server.registerTool(
   "get_code_structure",
   {
-    title: "Get C# Code Structure",
+    title: "Get Code Structure",
     description:
-      "Map C# code structure using Roslyn AST analysis. Returns classes, interfaces, methods, " +
+      "Map code structure using AST analysis. Returns classes, interfaces, methods, " +
       "properties, records, enums with their signatures, line numbers, base types, and doc comments. " +
-      "Use this to understand a C# codebase without reading every file. " +
+      "Supports C# (via Roslyn) and Rust (when RustMapper is installed). " +
+      "Language is auto-detected from file extensions; override with the language param. " +
+      "Use this to understand a codebase without reading every file. " +
       "Pair with verify_changes to validate proposed edits compile before writing to disk.",
     inputSchema: {
       path: z.string().describe("Path to directory or file to analyze"),
       format: z.enum(["text", "json", "yaml"]).optional().default("json").describe("Output format"),
+      language: z.enum(["csharp", "rust"]).optional().describe("Language to analyze. Auto-detected from file extensions if omitted."),
     },
     annotations: {
-      title: "Get C# Code Structure",
+      title: "Get Code Structure",
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false,
     },
   },
-  async ({ path, format }) => {
+  async ({ path, format, language }) => {
     try {
-      const result = await map({ path, format, codeMapperPath: DEFAULT_CODE_MAPPER });
+      const result = await map({ path, format, language });
       return {
         content: [{ type: "text" as const, text: result.output }],
       };
@@ -205,8 +208,8 @@ server.registerTool(
         // Not running, proceed to start
       }
 
-      // Spawn daemon as detached subprocess
-      Bun.spawn(["vslsp", "serve", "--solution", solution, "--port", String(port)], {
+      // Spawn daemon as detached subprocess using absolute path (avoids PATH issues in MCP context)
+      Bun.spawn([DEFAULT_VSLSP, "serve", "--solution", solution, "--port", String(port)], {
         stdout: "ignore",
         stderr: "ignore",
         stdin: "ignore",
@@ -251,6 +254,34 @@ server.registerTool(
       if ((e as any).code === "DAEMON_NOT_RUNNING") {
         return ok({ status: "not_running", port });
       }
+      return err(e instanceof Error ? e.message : String(e));
+    }
+  }
+);
+
+server.registerTool(
+  "stop_daemon",
+  {
+    title: "Stop Diagnostics Daemon",
+    description:
+      "Stop the running vslsp diagnostics daemon. " +
+      "Use when done with a session or to restart with a different solution.",
+    inputSchema: {
+      port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port"),
+    },
+    annotations: {
+      title: "Stop Diagnostics Daemon",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({ port }) => {
+    try {
+      await stop(port);
+      return ok({ status: "stopped", port });
+    } catch (e) {
       return err(e instanceof Error ? e.message : String(e));
     }
   }

@@ -92,6 +92,12 @@ export function createHttpServer(options: HttpServerOptions) {
           return Response.json({ ok: true, action: "didChange", path: normalizedPath }, { headers: corsHeaders });
         }
 
+        // POST /stop
+        if (method === "POST" && path === "/stop") {
+          setTimeout(() => process.exit(0), 100);
+          return Response.json({ ok: true, message: "Daemon stopping" }, { headers: corsHeaders });
+        }
+
         // 404 for unknown routes
         return Response.json({ error: "Not found" }, { status: 404, headers: corsHeaders });
       } catch (err) {

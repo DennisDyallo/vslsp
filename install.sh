@@ -86,6 +86,9 @@ download_vslsp() {
     mkdir -p "$INSTALL_DIR"
     download "$url" "$INSTALL_DIR/vslsp"
     chmod +x "$INSTALL_DIR/vslsp"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        xattr -dr com.apple.quarantine "$INSTALL_DIR/vslsp" 2>/dev/null || true
+    fi
     info "vslsp binary installed to $INSTALL_DIR/vslsp"
 }
 
@@ -99,6 +102,9 @@ download_vslsp_mcp() {
     mkdir -p "$INSTALL_DIR"
     download "$url" "$INSTALL_DIR/vslsp-mcp"
     chmod +x "$INSTALL_DIR/vslsp-mcp"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        xattr -dr com.apple.quarantine "$INSTALL_DIR/vslsp-mcp" 2>/dev/null || true
+    fi
     info "vslsp-mcp binary installed to $INSTALL_DIR/vslsp-mcp"
 }
 
@@ -133,6 +139,9 @@ download_omnisharp() {
     rm -f "$tmp_archive"
 
     chmod +x "$omnisharp_dir/OmniSharp"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        xattr -dr com.apple.quarantine "$omnisharp_dir/OmniSharp" 2>/dev/null || true
+    fi
     info "OmniSharp installed to $omnisharp_dir/OmniSharp"
 }
 
@@ -147,7 +156,28 @@ download_code_mapper() {
     mkdir -p "$code_mapper_dir"
     download "$url" "$code_mapper_dir/CodeMapper"
     chmod +x "$code_mapper_dir/CodeMapper"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        xattr -dr com.apple.quarantine "$code_mapper_dir/CodeMapper" 2>/dev/null || true
+    fi
     info "CodeMapper installed to $code_mapper_dir/CodeMapper"
+}
+
+# Download RustMapper (optional — skips gracefully if not in release)
+download_rust_mapper() {
+    local platform="$1" version="$2"
+    local url="https://github.com/${REPO}/releases/download/${version}/RustMapper-${platform}"
+    local rust_mapper_dir="$INSTALL_DIR/rust-mapper"
+
+    if curl --head --silent --fail "$url" > /dev/null 2>&1; then
+        info "Downloading RustMapper for ${platform}..."
+        mkdir -p "$rust_mapper_dir"
+        download "$url" "$rust_mapper_dir/RustMapper"
+        chmod +x "$rust_mapper_dir/RustMapper"
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            xattr -dr com.apple.quarantine "$rust_mapper_dir/RustMapper" 2>/dev/null || true
+        fi
+        info "RustMapper installed to $rust_mapper_dir/RustMapper"
+    fi
 }
 
 # Create symlink in ~/.local/bin
@@ -184,6 +214,35 @@ create_symlink() {
     fi
 }
 
+# Register MCP server in ~/.claude.json (Claude Code's global MCP config)
+configure_mcp() {
+    local claude_config="$HOME/.claude.json"
+    if command -v python3 &> /dev/null; then
+        python3 - <<PYEOF
+import json, os, sys
+path = os.path.expanduser("$claude_config")
+config = {}
+if os.path.exists(path):
+    try:
+        with open(path) as f:
+            config = json.load(f)
+    except Exception:
+        pass
+config.setdefault("mcpServers", {})["vslsp"] = {
+    "type": "stdio",
+    "command": "$BIN_DIR/vslsp-mcp",
+    "args": []
+}
+with open(path, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+print("[INFO] MCP server registered in ~/.claude.json")
+PYEOF
+    else
+        warn "python3 not found — skipping MCP registration. Add vslsp manually to ~/.claude.json mcpServers."
+    fi
+}
+
 # Verify installation
 verify_install() {
     info "Verifying installation..."
@@ -217,7 +276,9 @@ main() {
     download_vslsp_mcp "$platform" "$version"
     download_omnisharp "$platform"
     download_code_mapper "$platform" "$version"
+    download_rust_mapper "$platform" "$version"
     create_symlink
+    configure_mcp
     verify_install
 
     echo ""

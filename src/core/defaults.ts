@@ -19,3 +19,20 @@ export const DEFAULT_CODE_MAPPER = join(
   "code-mapper",
   "CodeMapper"
 );
+
+export const DEFAULT_VSLSP = join(
+  process.env.HOME || "~",
+  ".local",
+  "share",
+  "vslsp",
+  "vslsp"
+);
+
+export const DEFAULT_RUST_MAPPER = join(
+  process.env.HOME || "~",
+  ".local",
+  "share",
+  "vslsp",
+  "rust-mapper",
+  "RustMapper"
+);
