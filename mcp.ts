@@ -7,6 +7,7 @@ import { readFileSync } from "fs";
 import { DiagnosticsCollector } from "./src/diagnostics/collector";
 import { query, status, notify, stop } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
+import { collectRustDiagnostics } from "./src/diagnostics/rust";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
 
 function ok(data: Record<string, unknown>) {
@@ -19,7 +20,7 @@ function err(message: string) {
 
 const server = new McpServer({
   name: "vslsp",
-  version: "1.0.0",
+  version: "1.1.0",
 });
 
 // --- Diagnostics Tools ---
@@ -403,6 +404,57 @@ server.registerTool(
       }
 
       return ok({ ...data, verified_files: paths, reverted: true });
+    } catch (e) {
+      return err(e instanceof Error ? e.message : String(e));
+    }
+  }
+);
+
+// --- Rust Diagnostics ---
+
+server.registerTool(
+  "get_rust_diagnostics",
+  {
+    title: "Get Rust Diagnostics",
+    description:
+      "Get Rust compilation diagnostics (errors and warnings) by running cargo check. " +
+      "No daemon required — spawns cargo directly. " +
+      "Returns the same structured schema as get_diagnostics for C#: " +
+      "file paths, line numbers, column numbers, error codes (e.g. E0596), and severity. " +
+      "Use to find all compile errors before or after editing Rust source files. " +
+      "Requires cargo in PATH on the host machine.",
+    inputSchema: {
+      manifest: z.string().describe(
+        "Path to Cargo.toml or directory containing one. " +
+        "For workspaces, point to the workspace root Cargo.toml."
+      ),
+      package: z.string().optional().describe(
+        "Specific package name in a workspace. Omit to check all packages."
+      ),
+      file: z.string().optional().describe(
+        "Filter diagnostics to a specific .rs source file path."
+      ),
+      all_targets: z.boolean().optional().default(false).describe(
+        "Include tests, examples, and benches (cargo check --all-targets)."
+      ),
+    },
+    annotations: {
+      title: "Get Rust Diagnostics",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({ manifest, package: pkg, file, all_targets }) => {
+    try {
+      const result = await collectRustDiagnostics({
+        manifest,
+        package: pkg,
+        file,
+        allTargets: all_targets,
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
       return err(e instanceof Error ? e.message : String(e));
     }

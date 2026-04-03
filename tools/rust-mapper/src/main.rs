@@ -38,6 +38,7 @@ struct CodeMember {
     signature: String,
     line_number: usize,
     is_static: bool,
+    visibility: String,
     doc_string: String,
     base_types: Vec<String>,
     attributes: Vec<String>,
@@ -70,11 +71,9 @@ fn extract_attrs(attrs: &[syn::Attribute]) -> Vec<String> {
     attrs
         .iter()
         .filter_map(|a| {
-            // Keep only outer attributes, skip doc comments handled separately
             if a.path().is_ident("doc") {
                 return None;
             }
-            // Render the meta tokens as a string, strip leading/trailing #[ ]
             let ts = &a.meta;
             Some(format!("{}", quote::ToTokens::to_token_stream(ts)))
         })
@@ -97,7 +96,6 @@ fn extract_doc(attrs: &[syn::Attribute]) -> String {
         }
     }
     let joined = lines.join(" ");
-    // First sentence only
     joined
         .split('.')
         .next()
@@ -109,67 +107,191 @@ fn span_line(span: Span) -> usize {
     span.start().line
 }
 
+// ── A1: Type rendering (clean, no token-stream spacing artifacts) ─────────────
+
+fn type_to_string(ty: &syn::Type) -> String {
+    match ty {
+        syn::Type::Reference(r) => {
+            let lt = r
+                .lifetime
+                .as_ref()
+                .map(|l| format!("'{} ", l.ident))
+                .unwrap_or_default();
+            let mut_ = if r.mutability.is_some() { "mut " } else { "" };
+            format!("&{}{}{}", lt, mut_, type_to_string(&r.elem))
+        }
+        syn::Type::Path(p) => path_type_to_string(&p.path),
+        syn::Type::Slice(s) => format!("[{}]", type_to_string(&s.elem)),
+        syn::Type::Array(a) => format!(
+            "[{}; {}]",
+            type_to_string(&a.elem),
+            quote::ToTokens::to_token_stream(&a.len) // const exprs are fine with token stream
+        ),
+        syn::Type::Tuple(t) => {
+            let elems: Vec<_> = t.elems.iter().map(type_to_string).collect();
+            format!("({})", elems.join(", "))
+        }
+        syn::Type::Ptr(p) => {
+            let mut_ = if p.mutability.is_some() {
+                "mut "
+            } else {
+                "const "
+            };
+            format!("*{}{}", mut_, type_to_string(&p.elem))
+        }
+        syn::Type::TraitObject(t) => {
+            let bounds: Vec<_> = t.bounds.iter().map(bound_to_string).collect();
+            format!("dyn {}", bounds.join(" + "))
+        }
+        syn::Type::ImplTrait(t) => {
+            let bounds: Vec<_> = t.bounds.iter().map(bound_to_string).collect();
+            format!("impl {}", bounds.join(" + "))
+        }
+        syn::Type::Paren(p) => type_to_string(&p.elem),
+        // Fallback: BareFn, Infer, Macro, Never, Verbatim
+        _ => format!("{}", quote::ToTokens::to_token_stream(ty)),
+    }
+}
+
+fn path_type_to_string(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|seg| {
+            let args = match &seg.arguments {
+                syn::PathArguments::None => String::new(),
+                syn::PathArguments::AngleBracketed(ab) => {
+                    let args: Vec<_> = ab.args.iter().map(generic_arg_to_string).collect();
+                    format!("<{}>", args.join(", "))
+                }
+                syn::PathArguments::Parenthesized(p) => {
+                    let inputs: Vec<_> = p.inputs.iter().map(type_to_string).collect();
+                    let output = match &p.output {
+                        syn::ReturnType::Default => String::new(),
+                        syn::ReturnType::Type(_, ty) => format!(" -> {}", type_to_string(ty)),
+                    };
+                    format!("({}){}", inputs.join(", "), output)
+                }
+            };
+            format!("{}{}", seg.ident, args)
+        })
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+fn generic_arg_to_string(arg: &syn::GenericArgument) -> String {
+    match arg {
+        syn::GenericArgument::Type(ty) => type_to_string(ty),
+        syn::GenericArgument::Lifetime(lt) => format!("'{}", lt.ident),
+        syn::GenericArgument::Const(expr) => {
+            format!("{}", quote::ToTokens::to_token_stream(expr))
+        }
+        syn::GenericArgument::AssocType(at) => {
+            format!("{} = {}", at.ident, type_to_string(&at.ty))
+        }
+        _ => format!("{}", quote::ToTokens::to_token_stream(arg)),
+    }
+}
+
+fn bound_to_string(bound: &syn::TypeParamBound) -> String {
+    match bound {
+        syn::TypeParamBound::Trait(t) => path_type_to_string(&t.path),
+        syn::TypeParamBound::Lifetime(lt) => format!("'{}", lt.ident),
+        _ => format!("{}", quote::ToTokens::to_token_stream(bound)),
+    }
+}
+
+fn fn_arg_to_string(arg: &syn::FnArg) -> String {
+    match arg {
+        syn::FnArg::Receiver(r) => {
+            let ref_part = if let Some((_, lt)) = &r.reference {
+                let lt_str = lt
+                    .as_ref()
+                    .map(|l| format!("'{} ", l.ident))
+                    .unwrap_or_default();
+                format!("&{}", lt_str)
+            } else {
+                String::new()
+            };
+            let mut_ = if r.mutability.is_some() { "mut " } else { "" };
+            format!("{}{}self", ref_part, mut_)
+        }
+        syn::FnArg::Typed(pt) => {
+            // Pattern names (identifiers) are fine to render via token stream
+            let pat = format!("{}", quote::ToTokens::to_token_stream(&*pt.pat));
+            format!("{}: {}", pat, type_to_string(&pt.ty))
+        }
+    }
+}
+
+// ── A2: Function modifiers and generic bounds ─────────────────────────────────
+
+fn sig_modifiers(sig: &syn::Signature) -> String {
+    let mut parts = Vec::new();
+    if sig.constness.is_some() {
+        parts.push("const");
+    }
+    if sig.asyncness.is_some() {
+        parts.push("async");
+    }
+    if sig.unsafety.is_some() {
+        parts.push("unsafe");
+    }
+    parts.join(" ")
+}
+
+fn generics_to_string(generics: &syn::Generics) -> String {
+    if generics.params.is_empty() {
+        return String::new();
+    }
+    let params: Vec<_> = generics
+        .params
+        .iter()
+        .map(|p| match p {
+            syn::GenericParam::Type(t) => {
+                if t.bounds.is_empty() {
+                    t.ident.to_string()
+                } else {
+                    let bounds: Vec<_> = t.bounds.iter().map(bound_to_string).collect();
+                    format!("{}: {}", t.ident, bounds.join(" + "))
+                }
+            }
+            syn::GenericParam::Lifetime(l) => format!("'{}", l.lifetime.ident),
+            syn::GenericParam::Const(c) => {
+                format!("const {}: {}", c.ident, type_to_string(&c.ty))
+            }
+        })
+        .collect();
+    format!("<{}>", params.join(", "))
+}
+
+// ── A3: Visibility ────────────────────────────────────────────────────────────
+
+fn visibility_to_string(vis: &syn::Visibility) -> String {
+    match vis {
+        syn::Visibility::Public(_) => "public".into(),
+        syn::Visibility::Restricted(r) => match path_to_string(&r.path).as_str() {
+            "crate" => "crate".into(),
+            "super" => "super".into(),
+            "self" => "private".into(),
+            other => format!("restricted({})", other),
+        },
+        syn::Visibility::Inherited => "private".into(),
+    }
+}
+
+/// Returns the `pub`/`pub(crate)` prefix to prepend to a signature string,
+/// so signatures match source code verbatim.
+fn vis_prefix_str(vis: &syn::Visibility) -> &'static str {
+    match vis {
+        syn::Visibility::Public(_) => "pub ",
+        syn::Visibility::Restricted(_) => "pub(...) ",
+        syn::Visibility::Inherited => "",
+    }
+}
+
 // ── Signature builders ────────────────────────────────────────────────────────
 
-fn fn_signature(f: &syn::ItemFn) -> String {
-    let name = &f.sig.ident;
-    let inputs: Vec<String> = f
-        .sig
-        .inputs
-        .iter()
-        .map(|arg| format!("{}", quote::ToTokens::to_token_stream(arg)))
-        .collect();
-    let output = match &f.sig.output {
-        syn::ReturnType::Default => String::new(),
-        syn::ReturnType::Type(_, ty) => {
-            format!(" -> {}", quote::ToTokens::to_token_stream(ty))
-        }
-    };
-    format!("fn {}({}){}", name, inputs.join(", "), output)
-}
-
-fn method_signature(m: &syn::ImplItemFn) -> (String, bool) {
-    let name = &m.sig.ident;
-    let inputs: Vec<String> = m
-        .sig
-        .inputs
-        .iter()
-        .map(|arg| format!("{}", quote::ToTokens::to_token_stream(arg)))
-        .collect();
-    let output = match &m.sig.output {
-        syn::ReturnType::Default => String::new(),
-        syn::ReturnType::Type(_, ty) => {
-            format!(" -> {}", quote::ToTokens::to_token_stream(ty))
-        }
-    };
-    let is_static = !m
-        .sig
-        .inputs
-        .iter()
-        .any(|arg| matches!(arg, syn::FnArg::Receiver(_)));
-    (
-        format!("fn {}({}){}", name, inputs.join(", "), output),
-        is_static,
-    )
-}
-
-fn trait_method_signature(m: &syn::TraitItemFn) -> String {
-    let name = &m.sig.ident;
-    let inputs: Vec<String> = m
-        .sig
-        .inputs
-        .iter()
-        .map(|arg| format!("{}", quote::ToTokens::to_token_stream(arg)))
-        .collect();
-    let output = match &m.sig.output {
-        syn::ReturnType::Default => String::new(),
-        syn::ReturnType::Type(_, ty) => {
-            format!(" -> {}", quote::ToTokens::to_token_stream(ty))
-        }
-    };
-    format!("fn {}({}){}", name, inputs.join(", "), output)
-}
-
+/// Path rendered as segment names only (no generics) — for trait/impl names.
 fn path_to_string(path: &syn::Path) -> String {
     path.segments
         .iter()
@@ -178,13 +300,156 @@ fn path_to_string(path: &syn::Path) -> String {
         .join("::")
 }
 
+fn fn_signature(f: &syn::ItemFn) -> String {
+    let name = &f.sig.ident;
+    let inputs: Vec<String> = f.sig.inputs.iter().map(fn_arg_to_string).collect();
+    let output = match &f.sig.output {
+        syn::ReturnType::Default => String::new(),
+        syn::ReturnType::Type(_, ty) => format!(" -> {}", type_to_string(ty)),
+    };
+    let mods = sig_modifiers(&f.sig);
+    let mod_prefix = if mods.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", mods)
+    };
+    let vis = vis_prefix_str(&f.vis);
+    format!(
+        "{}{}fn {}{}({}){}",
+        vis,
+        mod_prefix,
+        name,
+        generics_to_string(&f.sig.generics),
+        inputs.join(", "),
+        output
+    )
+}
+
+fn method_signature(m: &syn::ImplItemFn) -> (String, bool) {
+    let name = &m.sig.ident;
+    let inputs: Vec<String> = m.sig.inputs.iter().map(fn_arg_to_string).collect();
+    let output = match &m.sig.output {
+        syn::ReturnType::Default => String::new(),
+        syn::ReturnType::Type(_, ty) => format!(" -> {}", type_to_string(ty)),
+    };
+    let is_static = !m
+        .sig
+        .inputs
+        .iter()
+        .any(|arg| matches!(arg, syn::FnArg::Receiver(_)));
+    let mods = sig_modifiers(&m.sig);
+    let mod_prefix = if mods.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", mods)
+    };
+    let vis = vis_prefix_str(&m.vis);
+    (
+        format!(
+            "{}{}fn {}{}({}){}",
+            vis,
+            mod_prefix,
+            name,
+            generics_to_string(&m.sig.generics),
+            inputs.join(", "),
+            output
+        ),
+        is_static,
+    )
+}
+
+fn trait_method_signature(m: &syn::TraitItemFn) -> String {
+    let name = &m.sig.ident;
+    let inputs: Vec<String> = m.sig.inputs.iter().map(fn_arg_to_string).collect();
+    let output = match &m.sig.output {
+        syn::ReturnType::Default => String::new(),
+        syn::ReturnType::Type(_, ty) => format!(" -> {}", type_to_string(ty)),
+    };
+    let mods = sig_modifiers(&m.sig);
+    let mod_prefix = if mods.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", mods)
+    };
+    // Trait methods are always public by language rules — no vis prefix in source
+    format!(
+        "{}fn {}{}({}){}",
+        mod_prefix,
+        name,
+        generics_to_string(&m.sig.generics),
+        inputs.join(", "),
+        output
+    )
+}
+
+// ── A4: Struct fields and enum variants ──────────────────────────────────────
+
+fn field_to_member(field: &syn::Field, idx: usize) -> CodeMember {
+    let name = field
+        .ident
+        .as_ref()
+        .map(|i| i.to_string())
+        .unwrap_or_else(|| idx.to_string()); // tuple structs: "0", "1", ...
+    let ty = type_to_string(&field.ty);
+    let vis = visibility_to_string(&field.vis);
+    let vis_prefix = vis_prefix_str(&field.vis);
+    CodeMember {
+        kind: "Field".into(),
+        signature: format!("{}{}: {}", vis_prefix, name, ty),
+        line_number: field
+            .ident
+            .as_ref()
+            .map(|i| span_line(i.span()))
+            .unwrap_or(0),
+        is_static: false,
+        visibility: vis,
+        doc_string: extract_doc(&field.attrs),
+        base_types: Vec::new(),
+        attributes: extract_attrs(&field.attrs),
+        children: Vec::new(),
+    }
+}
+
+fn variant_to_member(variant: &syn::Variant) -> CodeMember {
+    let name = variant.ident.to_string();
+    let sig = match &variant.fields {
+        syn::Fields::Unit => name.clone(),
+        syn::Fields::Unnamed(f) => {
+            let types: Vec<_> = f.unnamed.iter().map(|f| type_to_string(&f.ty)).collect();
+            format!("{}({})", name, types.join(", "))
+        }
+        syn::Fields::Named(f) => {
+            let parts: Vec<_> = f
+                .named
+                .iter()
+                .map(|f| {
+                    let n = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                    format!("{}: {}", n, type_to_string(&f.ty))
+                })
+                .collect();
+            format!("{} {{ {} }}", name, parts.join(", "))
+        }
+    };
+    CodeMember {
+        kind: "Variant".into(),
+        signature: sig,
+        line_number: span_line(variant.ident.span()),
+        is_static: false,
+        visibility: "public".into(), // enum variants are always public
+        doc_string: extract_doc(&variant.attrs),
+        base_types: Vec::new(),
+        attributes: extract_attrs(&variant.attrs),
+        children: Vec::new(),
+    }
+}
+
 // ── mod resolution ────────────────────────────────────────────────────────────
 
 fn resolve_mod_file(current_file: &Path, mod_name: &str) -> Option<PathBuf> {
     let dir = current_file.parent()?;
 
     // 2018-edition layout: src/foo.rs containing `mod bar;` resolves to src/foo/bar.rs
-    // Detect this by checking if the current file is NOT mod.rs / main.rs / lib.rs
+    // Only applies when the current file is NOT mod.rs / main.rs / lib.rs
     let stem = current_file.file_stem()?.to_string_lossy();
     if stem != "mod" && stem != "main" && stem != "lib" {
         let subdir = dir.join(stem.as_ref());
@@ -234,12 +499,12 @@ fn parse_file_members(file_path: &Path, visited: &HashSet<PathBuf>) -> Vec<CodeM
 
 impl<'ast> Visit<'ast> for StructureCollector {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let sig = fn_signature(node);
         let member = CodeMember {
             kind: "Fn".into(),
-            signature: sig,
+            signature: fn_signature(node),
             line_number: span_line(node.sig.ident.span()),
             is_static: true,
+            visibility: visibility_to_string(&node.vis),
             doc_string: extract_doc(&node.attrs),
             base_types: Vec::new(),
             attributes: extract_attrs(&node.attrs),
@@ -251,42 +516,66 @@ impl<'ast> Visit<'ast> for StructureCollector {
 
     fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
         let name = node.ident.to_string();
+        let vis = visibility_to_string(&node.vis);
+        let vis_pre = vis_prefix_str(&node.vis);
+        let children: Vec<CodeMember> = match &node.fields {
+            syn::Fields::Named(f) => f
+                .named
+                .iter()
+                .enumerate()
+                .map(|(i, f)| field_to_member(f, i))
+                .collect(),
+            syn::Fields::Unnamed(f) => f
+                .unnamed
+                .iter()
+                .enumerate()
+                .map(|(i, f)| field_to_member(f, i))
+                .collect(),
+            syn::Fields::Unit => Vec::new(),
+        };
         let member = CodeMember {
             kind: "Struct".into(),
-            signature: format!("struct {}", name),
+            signature: format!("{}struct {}", vis_pre, name),
             line_number: span_line(node.ident.span()),
             is_static: false,
+            visibility: vis,
             doc_string: extract_doc(&node.attrs),
             base_types: Vec::new(),
             attributes: extract_attrs(&node.attrs),
-            children: Vec::new(),
+            children,
         };
         self.members.push(member);
     }
 
     fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
         let name = node.ident.to_string();
+        let vis = visibility_to_string(&node.vis);
+        let vis_pre = vis_prefix_str(&node.vis);
+        let children: Vec<CodeMember> = node.variants.iter().map(variant_to_member).collect();
         let member = CodeMember {
             kind: "Enum".into(),
-            signature: format!("enum {}", name),
+            signature: format!("{}enum {}", vis_pre, name),
             line_number: span_line(node.ident.span()),
             is_static: false,
+            visibility: vis,
             doc_string: extract_doc(&node.attrs),
             base_types: Vec::new(),
             attributes: extract_attrs(&node.attrs),
-            children: Vec::new(),
+            children,
         };
         self.members.push(member);
     }
 
     fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
         let name = node.ident.to_string();
+        let vis = visibility_to_string(&node.vis);
+        let vis_pre = vis_prefix_str(&node.vis);
         let base_types: Vec<String> = node
             .supertraits
             .iter()
             .filter_map(|tb| {
                 if let syn::TypeParamBound::Trait(t) = tb {
-                    Some(path_to_string(&t.path))
+                    Some(path_type_to_string(&t.path))
                 } else {
                     None
                 }
@@ -297,7 +586,7 @@ impl<'ast> Visit<'ast> for StructureCollector {
             .iter()
             .filter_map(|item| {
                 if let syn::TraitItem::Fn(m) = item {
-                    let trait_method_is_static = !m
+                    let is_static = !m
                         .sig
                         .inputs
                         .iter()
@@ -306,7 +595,8 @@ impl<'ast> Visit<'ast> for StructureCollector {
                         kind: "Fn".into(),
                         signature: trait_method_signature(m),
                         line_number: span_line(m.sig.ident.span()),
-                        is_static: trait_method_is_static,
+                        is_static,
+                        visibility: "public".into(), // trait items are always public
                         doc_string: extract_doc(&m.attrs),
                         base_types: Vec::new(),
                         attributes: extract_attrs(&m.attrs),
@@ -319,9 +609,15 @@ impl<'ast> Visit<'ast> for StructureCollector {
             .collect();
         let member = CodeMember {
             kind: "Trait".into(),
-            signature: format!("trait {}", name),
+            signature: format!(
+                "{}trait {}{}",
+                vis_pre,
+                name,
+                generics_to_string(&node.generics)
+            ),
             line_number: span_line(node.ident.span()),
             is_static: false,
+            visibility: vis,
             doc_string: extract_doc(&node.attrs),
             base_types,
             attributes: extract_attrs(&node.attrs),
@@ -331,15 +627,18 @@ impl<'ast> Visit<'ast> for StructureCollector {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        let type_name = format!("{}", quote::ToTokens::to_token_stream(&*node.self_ty));
+        let type_name = type_to_string(&node.self_ty);
         let (sig, base_types) = if let Some((_, trait_path, _)) = &node.trait_ {
-            let trait_name = path_to_string(trait_path);
+            let trait_name = path_type_to_string(trait_path);
             (
                 format!("impl {} for {}", trait_name, type_name),
                 vec![trait_name],
             )
         } else {
-            (format!("impl {}", type_name), Vec::new())
+            (
+                format!("impl {}{}", generics_to_string(&node.generics), type_name),
+                Vec::new(),
+            )
         };
 
         let children: Vec<CodeMember> = node
@@ -353,6 +652,7 @@ impl<'ast> Visit<'ast> for StructureCollector {
                         signature: method_sig,
                         line_number: span_line(m.sig.ident.span()),
                         is_static,
+                        visibility: visibility_to_string(&m.vis),
                         doc_string: extract_doc(&m.attrs),
                         base_types: Vec::new(),
                         attributes: extract_attrs(&m.attrs),
@@ -371,6 +671,7 @@ impl<'ast> Visit<'ast> for StructureCollector {
             signature: sig,
             line_number: line,
             is_static: false,
+            visibility: "private".into(), // impl blocks have no visibility
             doc_string: String::new(),
             base_types,
             attributes: extract_attrs(&node.attrs),
@@ -382,6 +683,8 @@ impl<'ast> Visit<'ast> for StructureCollector {
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
         let name = node.ident.to_string();
         let line = span_line(node.ident.span());
+        let vis = visibility_to_string(&node.vis);
+        let vis_pre = vis_prefix_str(&node.vis);
         let children = if let Some((_, items)) = &node.content {
             // Inline mod — recurse into items
             let mut sub = StructureCollector::new(self.file_path.clone(), self.visited.clone());
@@ -409,9 +712,10 @@ impl<'ast> Visit<'ast> for StructureCollector {
         };
         let member = CodeMember {
             kind: "Mod".into(),
-            signature: format!("mod {}", name),
+            signature: format!("{}mod {}", vis_pre, name),
             line_number: line,
             is_static: false,
+            visibility: vis,
             doc_string: extract_doc(&node.attrs),
             base_types: Vec::new(),
             attributes: extract_attrs(&node.attrs),
@@ -422,12 +726,15 @@ impl<'ast> Visit<'ast> for StructureCollector {
 
     fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
         let name = node.ident.to_string();
-        let ty = format!("{}", quote::ToTokens::to_token_stream(&*node.ty));
+        let ty = type_to_string(&node.ty);
+        let vis = visibility_to_string(&node.vis);
+        let vis_pre = vis_prefix_str(&node.vis);
         let member = CodeMember {
             kind: "Const".into(),
-            signature: format!("const {}: {}", name, ty),
+            signature: format!("{}const {}: {}", vis_pre, name, ty),
             line_number: span_line(node.ident.span()),
             is_static: false,
+            visibility: vis,
             doc_string: extract_doc(&node.attrs),
             base_types: Vec::new(),
             attributes: extract_attrs(&node.attrs),
@@ -438,12 +745,15 @@ impl<'ast> Visit<'ast> for StructureCollector {
 
     fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
         let name = node.ident.to_string();
-        let ty = format!("{}", quote::ToTokens::to_token_stream(&*node.ty));
+        let ty = type_to_string(&node.ty);
+        let vis = visibility_to_string(&node.vis);
+        let vis_pre = vis_prefix_str(&node.vis);
         let member = CodeMember {
             kind: "Static".into(),
-            signature: format!("static {}: {}", name, ty),
+            signature: format!("{}static {}: {}", vis_pre, name, ty),
             line_number: span_line(node.ident.span()),
             is_static: false,
+            visibility: vis,
             doc_string: extract_doc(&node.attrs),
             base_types: Vec::new(),
             attributes: extract_attrs(&node.attrs),
@@ -542,7 +852,6 @@ fn main() {
         }
     };
 
-    // Collect all .rs files
     let rs_files = if root_path.is_file() {
         vec![root_path.clone()]
     } else {
@@ -561,8 +870,7 @@ fn main() {
         return;
     }
 
-    // Group by nearest Cargo.toml (crate)
-    // If no Cargo.toml found, use root as the group key
+    // Group by nearest Cargo.toml (crate); fall back to synthetic root key
     let mut crate_files: std::collections::HashMap<PathBuf, Vec<PathBuf>> =
         std::collections::HashMap::new();
     for f in &rs_files {
