@@ -14,22 +14,17 @@ Installs the CLI, MCP server, OmniSharp (C#), CodeMapper (C#), and RustMapper (R
 
 ## What agents get
 
-**For C# projects:**
+| Capability | C# | Rust |
+|---|---|---|
+| All compilation diagnostics at once | ✅ | ✅ |
+| Structured code map (types, methods, fields) | ✅ | ✅ |
+| Struct fields and enum variants in output | ✅ | ✅ |
+| Signatures with visibility, modifiers, generics | ✅ | ✅ |
+| Persistent daemon (fast repeated queries) | ✅ | ❌ |
+| Dry-run compile check before writing to disk | ✅ | ❌ |
+| File-watching (auto-update diagnostics on save) | ✅ | ❌ |
 
-- All compilation errors and warnings at once, not just the first few
-- A structured map of every class, method, property, and field — without reading files
-- Dry-run refactoring: check whether proposed code compiles before touching disk
-- A persistent daemon that keeps diagnostics current as files change
-
-**For Rust projects:**
-
-- All `cargo check` errors and warnings, structured the same way as C# output
-- A structured map of every struct, enum, trait, and function — including field names, variant shapes, and visibility
-
-**For both:**
-
-- Consistent JSON output so agents work the same way regardless of language
-- Signatures that include visibility, async/unsafe/const modifiers, and generics
+The three Rust gaps are all daemon-dependent. Rust uses `cargo`'s incremental build cache instead — no long-running process needed, but no in-memory dry-run either.
 
 ## How it works
 
