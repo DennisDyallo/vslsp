@@ -10,7 +10,6 @@ class Program
 {
     static void Main(string[] args)
     {
-        // Parse CLI arguments
         string path = Directory.GetCurrentDirectory();
         string format = "text";
         string outputDir = Path.Combine(Directory.GetCurrentDirectory(), "codebase_ast");
@@ -28,20 +27,13 @@ class Program
                 }
             }
             else if (args[i] == "--output" && i + 1 < args.Length)
-            {
                 outputDir = args[++i];
-            }
             else if (args[i] == "--stdout")
-            {
                 stdoutMode = true;
-            }
             else if (!args[i].StartsWith("--"))
-            {
                 path = args[i];
-            }
         }
 
-        // Find all .csproj files to auto-detect projects
         var projects = Directory.GetFiles(path, "*.csproj", SearchOption.AllDirectories)
                                 .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
                                          && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
@@ -59,9 +51,8 @@ class Program
             Console.WriteLine($"Found {projects.Count} project(s) in {path}");
         }
 
-        // Summary counters
         int totalProjects = 0, totalFiles = 0, totalNamespaces = 0, totalTypes = 0, totalMethods = 0;
-        var allFileNodes = new List<FileNode>(); // accumulated for stdout mode
+        var allFileNodes = new List<FileNode>();
 
         foreach (var project in projects)
         {
@@ -81,14 +72,10 @@ class Program
                     var code = File.ReadAllText(file);
                     var tree = CSharpSyntaxTree.ParseText(code);
                     var root = tree.GetRoot();
-
                     var collector = new StructureCollector(Path.GetRelativePath(projectDir, file));
                     collector.Visit(root);
-
                     if (collector.RootNode.Members.Any())
-                    {
                         codebaseMap.Add(collector.RootNode);
-                    }
                 }
                 catch (Exception ex)
                 {
@@ -96,8 +83,7 @@ class Program
                 }
             }
 
-            if (codebaseMap.Count == 0)
-                continue;
+            if (codebaseMap.Count == 0) continue;
 
             totalProjects++;
             totalFiles += codebaseMap.Count;
@@ -111,27 +97,18 @@ class Program
             {
                 string ext = format switch { "json" => ".json", "yaml" => ".yaml", _ => ".txt" };
                 string outputPath = Path.Combine(outputDir, $"{projectName}{ext}");
-
                 switch (format)
                 {
-                    case "json":
-                        WriteJsonOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
-                        break;
-                    case "yaml":
-                        WriteYamlOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
-                        break;
-                    default:
-                        WriteTextOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods);
-                        break;
+                    case "json":  WriteJsonOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods); break;
+                    case "yaml":  WriteYamlOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods); break;
+                    default:      WriteTextOutput(outputPath, codebaseMap, totalFiles, totalNamespaces, totalTypes, totalMethods); break;
                 }
-
                 Console.WriteLine($"  ✅ {projectName}: {codebaseMap.Count} files");
             }
         }
 
         if (stdoutMode)
         {
-            // Emit all accumulated data to stdout as a single structured document
             switch (format)
             {
                 case "json":
@@ -160,9 +137,7 @@ class Program
     static void CountMembers(List<FileNode> files, ref int namespaces, ref int types, ref int methods)
     {
         foreach (var file in files)
-        {
             CountMembersRecursive(file.Members, ref namespaces, ref types, ref methods);
-        }
     }
 
     static void CountMembersRecursive(List<CodeMember> members, ref int namespaces, ref int types, ref int methods)
@@ -172,6 +147,7 @@ class Program
             if (m.Type == "Namespace") namespaces++;
             else if (m.Type is "Class" or "Interface" or "Record" or "Enum") types++;
             else if (m.Type is "Method" or "Constructor") methods++;
+            // Field, Property, Variant excluded from summary (consistent with RustMapper)
             CountMembersRecursive(m.Children, ref namespaces, ref types, ref methods);
         }
     }
@@ -204,7 +180,6 @@ class Program
     {
         sb.AppendLine($"# Summary: {totalFiles} files, {namespaces} namespaces, {types} types, {methods} methods");
         sb.AppendLine();
-
         foreach (var file in files)
         {
             sb.AppendLine($"# {file.FilePath}");
@@ -212,7 +187,7 @@ class Program
             sb.AppendLine();
         }
     }
-    
+
     static void WriteMembersCompact(StringBuilder sb, List<CodeMember> members, int depth)
     {
         string indent = new string(' ', depth * 2);
@@ -220,10 +195,9 @@ class Program
         {
             string typeLabel = m.IsStatic ? $"{m.Type}:static" : m.Type;
             string lineNum = m.LineNumber > 0 ? $" :{m.LineNumber}" : "";
-            string baseTypes = m.BaseTypes?.Count > 0 ? $" : {string.Join(", ", m.BaseTypes)}" : "";
-            string attrs = m.Attributes?.Count > 0 ? $" [{string.Join(", ", m.Attributes)}]" : "";
+            string baseTypes = m.BaseTypes.Count > 0 ? $" : {string.Join(", ", m.BaseTypes)}" : "";
+            string attrs = m.Attributes.Count > 0 ? $" [{string.Join(", ", m.Attributes)}]" : "";
             string doc = !string.IsNullOrEmpty(m.DocString) ? $" // {m.DocString}" : "";
-            
             sb.AppendLine($"{indent}[{typeLabel}] {m.Signature}{baseTypes}{attrs}{lineNum}{doc}");
             if (m.Children.Count > 0)
                 WriteMembersCompact(sb, m.Children, depth + 1);
@@ -268,45 +242,53 @@ class Program
         {
             sb.AppendLine($"{indent}- type: {m.Type}");
             sb.AppendLine($"{indent}  signature: \"{EscapeYaml(m.Signature)}\"");
-            if (m.LineNumber > 0)
-                sb.AppendLine($"{indent}  line: {m.LineNumber}");
-            if (m.IsStatic)
-                sb.AppendLine($"{indent}  static: true");
-            if (!string.IsNullOrEmpty(m.DocString))
-                sb.AppendLine($"{indent}  doc: \"{EscapeYaml(m.DocString)}\"");
-            if (m.BaseTypes?.Count > 0)
+            sb.AppendLine($"{indent}  lineNumber: {m.LineNumber}");
+            sb.AppendLine($"{indent}  isStatic: {m.IsStatic.ToString().ToLower()}");
+            sb.AppendLine($"{indent}  visibility: \"{m.Visibility}\"");
+            sb.AppendLine($"{indent}  docString: \"{EscapeYaml(m.DocString)}\"");
+            if (m.BaseTypes.Count > 0)
             {
                 sb.AppendLine($"{indent}  baseTypes:");
                 foreach (var bt in m.BaseTypes)
                     sb.AppendLine($"{indent}    - \"{EscapeYaml(bt)}\"");
             }
-            if (m.Attributes?.Count > 0)
+            else
+            {
+                sb.AppendLine($"{indent}  baseTypes: []");
+            }
+            if (m.Attributes.Count > 0)
             {
                 sb.AppendLine($"{indent}  attributes:");
                 foreach (var attr in m.Attributes)
                     sb.AppendLine($"{indent}    - \"{EscapeYaml(attr)}\"");
             }
+            else
+            {
+                sb.AppendLine($"{indent}  attributes: []");
+            }
             if (m.Children.Count > 0)
             {
-                sb.AppendLine($"{indent}  members:");
+                sb.AppendLine($"{indent}  children:");
                 WriteYamlMembers(sb, m.Children, depth + 2);
+            }
+            else
+            {
+                sb.AppendLine($"{indent}  children: []");
             }
         }
     }
 
     static string EscapeYaml(string value)
-    {
-        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
-    }
+        => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }
 
-// ---------------- Data Structures ----------------
+// ── Data Structures ───────────────────────────────────────────────────────────
 
 public class FileNode
 {
     [JsonPropertyName("filePath")]
     public string FilePath { get; set; } = "";
-    
+
     [JsonPropertyName("members")]
     public List<CodeMember> Members { get; set; } = new();
 }
@@ -315,32 +297,29 @@ public class CodeMember
 {
     [JsonPropertyName("type")]
     public string Type { get; set; } = "";
-    
+
     [JsonPropertyName("signature")]
     public string Signature { get; set; } = "";
-    
+
     [JsonPropertyName("lineNumber")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public int LineNumber { get; set; }
-    
+
     [JsonPropertyName("isStatic")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsStatic { get; set; }
-    
+
+    [JsonPropertyName("visibility")]
+    public string Visibility { get; set; } = "";
+
     [JsonPropertyName("docString")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DocString { get; set; }
-    
+    public string DocString { get; set; } = "";
+
     [JsonPropertyName("baseTypes")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<string>? BaseTypes { get; set; }
-    
+    public List<string> BaseTypes { get; set; } = new();
+
     [JsonPropertyName("attributes")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<string>? Attributes { get; set; }
-    
+    public List<string> Attributes { get; set; } = new();
+
     [JsonPropertyName("children")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<CodeMember> Children { get; set; } = new();
 }
 
@@ -348,13 +327,13 @@ public class Summary
 {
     [JsonPropertyName("files")]
     public int Files { get; set; }
-    
+
     [JsonPropertyName("namespaces")]
     public int Namespaces { get; set; }
-    
+
     [JsonPropertyName("types")]
     public int Types { get; set; }
-    
+
     [JsonPropertyName("methods")]
     public int Methods { get; set; }
 }
@@ -363,16 +342,16 @@ public class OutputRoot
 {
     [JsonPropertyName("summary")]
     public Summary Summary { get; set; } = new();
-    
+
     [JsonPropertyName("files")]
     public List<FileNode> FileNodes { get; set; } = new();
 }
 
 [JsonSerializable(typeof(OutputRoot))]
-[JsonSourceGenerationOptions(WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSourceGenerationOptions(WriteIndented = true)]
 internal partial class AppJsonContext : JsonSerializerContext { }
 
-// ---------------- Roslyn Syntax Walker ----------------
+// ── Roslyn Syntax Walker ──────────────────────────────────────────────────────
 
 public class StructureCollector : CSharpSyntaxWalker
 {
@@ -385,25 +364,69 @@ public class StructureCollector : CSharpSyntaxWalker
         RootNode = new FileNode { FilePath = filePath };
     }
 
+    // ── Visibility / modifier helpers ─────────────────────────────────────────
+
     private static bool IsPublicOrInternal(SyntaxTokenList modifiers)
     {
-        // If no access modifier, default depends on context (internal for types, private for members)
-        // We'll treat no modifier as potentially public/internal for top-level types
-        if (modifiers.Count == 0) return true;
-        
+        if (modifiers.Count == 0) return true; // default visibility passes through
         return modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword) || m.IsKind(SyntaxKind.InternalKeyword));
     }
 
     private static bool IsStatic(SyntaxTokenList modifiers)
+        => modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+
+    /// Returns the access level as a string matching RustMapper's vocabulary where possible.
+    private static string ExtractVisibility(SyntaxTokenList modifiers)
     {
-        return modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword))) return "public";
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.PrivateKeyword)))
+            return modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "private protected" : "private";
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)))
+            return modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "protected internal" : "protected";
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword))) return "internal";
+        return "private"; // C# default for members; types default to internal but we unify as private
     }
+
+    /// Builds the full modifier prefix for a signature string (visibility + other modifiers).
+    private static string BuildModifierPrefix(SyntaxTokenList modifiers)
+    {
+        var parts = new List<string>();
+
+        // Access level first (matches C# source code order)
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)))
+            parts.Add("public");
+        else if (modifiers.Any(m => m.IsKind(SyntaxKind.PrivateKeyword)))
+            parts.Add(modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "private protected" : "private");
+        else if (modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)))
+            parts.Add(modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "protected internal" : "protected");
+        else if (modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)))
+            parts.Add("internal");
+
+        // Other modifiers in source order
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)))   parts.Add("static");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword))) parts.Add("abstract");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword)))  parts.Add("virtual");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword))) parts.Add("override");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.SealedKeyword)))   parts.Add("sealed");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.AsyncKeyword)))    parts.Add("async");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword))) parts.Add("readonly");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)))    parts.Add("const");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.NewKeyword)))      parts.Add("new");
+        if (modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)))  parts.Add("partial");
+
+        return parts.Count > 0 ? string.Join(" ", parts) + " " : "";
+    }
+
+    private static string TypeParamsToString(TypeParameterListSyntax? tpl)
+        => tpl == null || tpl.Parameters.Count == 0 ? "" : tpl.ToString();
+
+    // ── Doc / attribute helpers ───────────────────────────────────────────────
 
     private static string ExtractFirstSentenceDoc(SyntaxNode node)
     {
         var trivia = node.GetLeadingTrivia();
         var xmlComments = trivia
-            .Where(t => t.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) || 
+            .Where(t => t.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) ||
                         t.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))
             .Select(t => t.GetStructure())
             .OfType<DocumentationCommentTriviaSyntax>()
@@ -421,24 +444,21 @@ public class StructureCollector : CSharpSyntaxWalker
             .Select(c => c.ToString().Trim())
             .Where(s => !string.IsNullOrEmpty(s)));
 
-        // Strip XML tags and normalize whitespace
         content = Regex.Replace(content, @"<[^>]+>", "");
         content = Regex.Replace(content, @"\s+", " ").Trim();
-        
-        // Truncate at first period or 100 chars
+
         int periodIdx = content.IndexOf('.');
         if (periodIdx > 0 && periodIdx < 100)
-            content = content.Substring(0, periodIdx + 1);
+            content = content[..(periodIdx + 1)];
         else if (content.Length > 100)
-            content = content.Substring(0, 100) + "...";
+            content = content[..100] + "...";
 
         return content;
     }
 
-    private static List<string>? ExtractAttributes(SyntaxList<AttributeListSyntax> attributeLists)
+    /// Extract attributes with actual argument text (not placeholder "...").
+    private static List<string> ExtractAttributes(SyntaxList<AttributeListSyntax> attributeLists)
     {
-        if (attributeLists.Count == 0) return null;
-        
         var attrs = new List<string>();
         foreach (var attrList in attributeLists)
         {
@@ -447,7 +467,8 @@ public class StructureCollector : CSharpSyntaxWalker
                 var name = attr.Name.ToString();
                 if (attr.ArgumentList != null && attr.ArgumentList.Arguments.Count > 0)
                 {
-                    attrs.Add($"{name}(...)");
+                    var args = attr.ArgumentList.Arguments.Select(a => a.ToString());
+                    attrs.Add($"{name}({string.Join(", ", args)})");
                 }
                 else
                 {
@@ -455,30 +476,32 @@ public class StructureCollector : CSharpSyntaxWalker
                 }
             }
         }
-        return attrs.Count > 0 ? attrs : null;
+        return attrs;
     }
 
-    private static List<string>? ExtractBaseTypes(BaseListSyntax? baseList)
+    private static List<string> ExtractBaseTypes(BaseListSyntax? baseList)
     {
-        if (baseList == null || baseList.Types.Count == 0) return null;
+        if (baseList == null || baseList.Types.Count == 0) return new();
         return baseList.Types.Select(t => t.Type.ToString()).ToList();
     }
 
-    private void PushMember(string type, string signature, SyntaxNode node, SyntaxTokenList modifiers, 
-        SyntaxList<AttributeListSyntax>? attributes = null, BaseListSyntax? baseList = null)
+    // ── Stack push helper ─────────────────────────────────────────────────────
+
+    private void PushMember(string type, string signature, SyntaxNode node, SyntaxTokenList modifiers,
+        SyntaxList<AttributeListSyntax>? attributes = null, BaseListSyntax? baseList = null,
+        string? visibilityOverride = null)
     {
-        var member = new CodeMember 
-        { 
-            Type = type, 
+        var member = new CodeMember
+        {
+            Type = type,
             Signature = signature,
             LineNumber = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
             IsStatic = IsStatic(modifiers),
+            Visibility = visibilityOverride ?? ExtractVisibility(modifiers),
             DocString = ExtractFirstSentenceDoc(node),
-            Attributes = attributes.HasValue ? ExtractAttributes(attributes.Value) : null,
-            BaseTypes = ExtractBaseTypes(baseList)
+            Attributes = attributes.HasValue ? ExtractAttributes(attributes.Value) : new(),
+            BaseTypes = ExtractBaseTypes(baseList),
         };
-
-        if (string.IsNullOrEmpty(member.DocString)) member.DocString = null;
 
         if (_stack.Count > 0)
             _stack.Peek().Children.Add(member);
@@ -488,11 +511,12 @@ public class StructureCollector : CSharpSyntaxWalker
         _stack.Push(member);
     }
 
-    // Phase 2.1: Namespace Context
+    // ── Namespace ─────────────────────────────────────────────────────────────
+
     public override void VisitNamespaceDeclaration(NamespaceDeclarationSyntax node)
     {
         _currentNamespace = node.Name.ToString();
-        PushMember("Namespace", _currentNamespace, node, default);
+        PushMember("Namespace", _currentNamespace, node, default, visibilityOverride: "");
         base.VisitNamespaceDeclaration(node);
         _stack.Pop();
         _currentNamespace = null;
@@ -501,18 +525,21 @@ public class StructureCollector : CSharpSyntaxWalker
     public override void VisitFileScopedNamespaceDeclaration(FileScopedNamespaceDeclarationSyntax node)
     {
         _currentNamespace = node.Name.ToString();
-        PushMember("Namespace", _currentNamespace, node, default);
+        PushMember("Namespace", _currentNamespace, node, default, visibilityOverride: "");
         base.VisitFileScopedNamespaceDeclaration(node);
         _stack.Pop();
         _currentNamespace = null;
     }
 
-    // Phase 1.1 & 2.2: Classes with visibility filter and base types
+    // ── Types ─────────────────────────────────────────────────────────────────
+
     public override void VisitClassDeclaration(ClassDeclarationSyntax node)
     {
         if (!IsPublicOrInternal(node.Modifiers)) return;
-        
-        PushMember("Class", node.Identifier.Text, node, node.Modifiers, node.AttributeLists, node.BaseList);
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        string typeParams = TypeParamsToString(node.TypeParameterList);
+        PushMember("Class", $"{modPrefix}class {node.Identifier.Text}{typeParams}",
+            node, node.Modifiers, node.AttributeLists, node.BaseList);
         base.VisitClassDeclaration(node);
         _stack.Pop();
     }
@@ -520,51 +547,88 @@ public class StructureCollector : CSharpSyntaxWalker
     public override void VisitInterfaceDeclaration(InterfaceDeclarationSyntax node)
     {
         if (!IsPublicOrInternal(node.Modifiers)) return;
-        
-        PushMember("Interface", node.Identifier.Text, node, node.Modifiers, node.AttributeLists, node.BaseList);
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        string typeParams = TypeParamsToString(node.TypeParameterList);
+        PushMember("Interface", $"{modPrefix}interface {node.Identifier.Text}{typeParams}",
+            node, node.Modifiers, node.AttributeLists, node.BaseList);
         base.VisitInterfaceDeclaration(node);
         _stack.Pop();
     }
 
-    // Phase 3.1: Records
     public override void VisitRecordDeclaration(RecordDeclarationSyntax node)
     {
         if (!IsPublicOrInternal(node.Modifiers)) return;
-        
-        string sig = node.ParameterList != null 
-            ? $"{node.Identifier}{node.ParameterList}" 
-            : node.Identifier.Text;
-        PushMember("Record", sig, node, node.Modifiers, node.AttributeLists, node.BaseList);
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        string typeParams = TypeParamsToString(node.TypeParameterList);
+        string paramList = node.ParameterList?.ToString() ?? "";
+        // record struct vs record class
+        string keyword = node.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword) ? "record struct" : "record";
+        PushMember("Record", $"{modPrefix}{keyword} {node.Identifier.Text}{typeParams}{paramList}",
+            node, node.Modifiers, node.AttributeLists, node.BaseList);
         base.VisitRecordDeclaration(node);
         _stack.Pop();
     }
 
-    // Phase 3.2: Enums
     public override void VisitEnumDeclaration(EnumDeclarationSyntax node)
     {
         if (!IsPublicOrInternal(node.Modifiers)) return;
-        
-        var memberNames = node.Members.Select(m => m.Identifier.Text);
-        string sig = $"{node.Identifier} {{ {string.Join(", ", memberNames)} }}";
-        PushMember("Enum", sig, node, node.Modifiers, node.AttributeLists);
-        _stack.Pop(); // Don't recurse into enum members
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        string sig = $"{modPrefix}enum {node.Identifier.Text}";
+
+        var member = new CodeMember
+        {
+            Type = "Enum",
+            Signature = sig,
+            LineNumber = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+            IsStatic = false,
+            Visibility = ExtractVisibility(node.Modifiers),
+            DocString = ExtractFirstSentenceDoc(node),
+            Attributes = ExtractAttributes(node.AttributeLists),
+            BaseTypes = ExtractBaseTypes(node.BaseList),
+        };
+
+        // Emit each enum member as a Variant child (parity with RustMapper)
+        foreach (var enumMember in node.Members)
+        {
+            string variantSig = enumMember.EqualsValue != null
+                ? $"{enumMember.Identifier.Text} = {enumMember.EqualsValue.Value}"
+                : enumMember.Identifier.Text;
+            member.Children.Add(new CodeMember
+            {
+                Type = "Variant",
+                Signature = variantSig,
+                LineNumber = enumMember.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                IsStatic = false,
+                Visibility = "public",
+                DocString = ExtractFirstSentenceDoc(enumMember),
+                Attributes = ExtractAttributes(enumMember.AttributeLists),
+            });
+        }
+
+        if (_stack.Count > 0)
+            _stack.Peek().Children.Add(member);
+        else
+            RootNode.Members.Add(member);
+        // No recursion — enum body is fully captured above
     }
 
-    // Phase 2.4: Constructors
+    // ── Members ───────────────────────────────────────────────────────────────
+
     public override void VisitConstructorDeclaration(ConstructorDeclarationSyntax node)
     {
         if (!IsPublicOrInternal(node.Modifiers)) return;
-        
-        string sig = $"{node.Identifier}{node.ParameterList}";
-        PushMember("Constructor", sig, node, node.Modifiers, node.AttributeLists);
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        PushMember("Constructor", $"{modPrefix}{node.Identifier.Text}{node.ParameterList}",
+            node, node.Modifiers, node.AttributeLists);
         _stack.Pop();
     }
 
     public override void VisitMethodDeclaration(MethodDeclarationSyntax node)
     {
         if (!IsPublicOrInternal(node.Modifiers)) return;
-        
-        string sig = $"{node.ReturnType} {node.Identifier}{node.ParameterList}";
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        string typeParams = TypeParamsToString(node.TypeParameterList);
+        string sig = $"{modPrefix}{node.ReturnType} {node.Identifier.Text}{typeParams}{node.ParameterList}";
         PushMember("Method", sig, node, node.Modifiers, node.AttributeLists);
         _stack.Pop();
     }
@@ -572,9 +636,50 @@ public class StructureCollector : CSharpSyntaxWalker
     public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
     {
         if (!IsPublicOrInternal(node.Modifiers)) return;
-        
-        string sig = $"{node.Type} {node.Identifier}";
-        PushMember("Property", sig, node, node.Modifiers, node.AttributeLists);
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        // Include accessor summary: { get; set; } / { get; } / { get; init; }
+        string accessors = "";
+        if (node.AccessorList != null)
+        {
+            var accs = node.AccessorList.Accessors.Select(a =>
+            {
+                string accMods = a.Modifiers.Count > 0 ? a.Modifiers.ToString() + " " : "";
+                return $"{accMods}{a.Keyword.Text};";
+            });
+            accessors = " { " + string.Join(" ", accs) + " }";
+        }
+        PushMember("Property", $"{modPrefix}{node.Type} {node.Identifier.Text}{accessors}",
+            node, node.Modifiers, node.AttributeLists);
         _stack.Pop();
+    }
+
+    public override void VisitFieldDeclaration(FieldDeclarationSyntax node)
+    {
+        if (!IsPublicOrInternal(node.Modifiers)) return;
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        string typeStr = node.Declaration.Type.ToString();
+        string vis = ExtractVisibility(node.Modifiers);
+        string doc = ExtractFirstSentenceDoc(node);
+        var attrs = ExtractAttributes(node.AttributeLists);
+        bool isStatic = IsStatic(node.Modifiers);
+
+        foreach (var variable in node.Declaration.Variables)
+        {
+            var member = new CodeMember
+            {
+                Type = "Field",
+                Signature = $"{modPrefix}{typeStr} {variable.Identifier.Text}",
+                LineNumber = variable.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                IsStatic = isStatic,
+                Visibility = vis,
+                DocString = doc,
+                Attributes = attrs,
+            };
+
+            if (_stack.Count > 0)
+                _stack.Peek().Children.Add(member);
+            else
+                RootNode.Members.Add(member);
+        }
     }
 }
