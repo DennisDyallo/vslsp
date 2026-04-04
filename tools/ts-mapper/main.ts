@@ -524,8 +524,7 @@ function visitVariableStatement(
   sf: ts.SourceFile,
   members: CodeMember[],
 ): void {
-  // Only capture exported arrow functions and function expressions
-  if (!isExported(node)) return;
+  const exported = isExported(node);
 
   for (const decl of node.declarationList.declarations) {
     const init = decl.initializer;
@@ -535,7 +534,22 @@ function visitVariableStatement(
         signature: varFnSignature(decl, node, sf),
         lineNumber: getLineNumber(node, sf),
         isStatic: true,
-        visibility: "public",
+        visibility: exported ? "public" : "private",
+        docString: extractDocString(node, sf.text),
+        baseTypes: [],
+        attributes: [],
+        children: [],
+      });
+    } else if (
+      (node.declarationList.flags & ts.NodeFlags.Const) &&
+      ts.isIdentifier(decl.name)
+    ) {
+      members.push({
+        type: "Const",
+        signature: varFnSignature(decl, node, sf),
+        lineNumber: getLineNumber(node, sf),
+        isStatic: false,
+        visibility: exported ? "public" : "private",
         docString: extractDocString(node, sf.text),
         baseTypes: [],
         attributes: [],

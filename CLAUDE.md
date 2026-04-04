@@ -133,7 +133,7 @@ Every member always emits all fields (no nulls):
 
 ```typescript
 {
-  type: "Class"|"Struct"|"Enum"|"Variant"|"Field"|"Property"|"Method"|
+  type: "Class"|"Struct"|"Enum"|"Variant"|"Field"|"Property"|"Method"|"Const"|
         "Constructor"|"Record"|"Interface"|"Trait"|"Impl"|"Fn"|"Mod"|"Namespace"|"Type",
   signature: string,         // includes visibility + modifiers verbatim
   lineNumber: number,
