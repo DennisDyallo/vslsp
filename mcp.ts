@@ -147,14 +147,14 @@ server.registerTool(
     description:
       "Map code structure using AST analysis. Returns classes, interfaces, methods, " +
       "properties, records, enums with their signatures, line numbers, base types, and doc comments. " +
-      "Supports C# (via Roslyn) and Rust (when RustMapper is installed). " +
+      "Supports C# (via Roslyn), Rust (via syn), and TypeScript (via TS Compiler API). " +
       "Language is auto-detected from file extensions; override with the language param. " +
       "Use this to understand a codebase without reading every file. " +
       "Pair with verify_changes to validate proposed edits compile before writing to disk.",
     inputSchema: {
       path: z.string().describe("Path to directory or file to analyze"),
       format: z.enum(["text", "json", "yaml"]).optional().default("json").describe("Output format"),
-      language: z.enum(["csharp", "rust"]).optional().describe("Language to analyze. Auto-detected from file extensions if omitted."),
+      language: z.enum(["csharp", "rust", "typescript"]).optional().describe("Language to analyze. Auto-detected from file extensions if omitted."),
     },
     annotations: {
       title: "Get Code Structure",

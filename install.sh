@@ -180,6 +180,24 @@ download_rust_mapper() {
     fi
 }
 
+# Download TSMapper (optional — skips gracefully if not in release)
+download_ts_mapper() {
+    local platform="$1" version="$2"
+    local url="https://github.com/${REPO}/releases/download/${version}/TSMapper-${platform}"
+    local ts_mapper_dir="$INSTALL_DIR/ts-mapper"
+
+    if curl --head --silent --fail "$url" > /dev/null 2>&1; then
+        info "Downloading TSMapper for ${platform}..."
+        mkdir -p "$ts_mapper_dir"
+        download "$url" "$ts_mapper_dir/TSMapper"
+        chmod +x "$ts_mapper_dir/TSMapper"
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            xattr -dr com.apple.quarantine "$ts_mapper_dir/TSMapper" 2>/dev/null || true
+        fi
+        info "TSMapper installed to $ts_mapper_dir/TSMapper"
+    fi
+}
+
 # Create symlink in ~/.local/bin
 create_symlink() {
     mkdir -p "$BIN_DIR"
@@ -277,6 +295,7 @@ main() {
     download_omnisharp "$platform"
     download_code_mapper "$platform" "$version"
     download_rust_mapper "$platform" "$version"
+    download_ts_mapper "$platform" "$version"
     create_symlink
     configure_mcp
     verify_install

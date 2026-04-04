@@ -1,0 +1,7 @@
+{
+  "name": "ts-mapper",
+  "private": true,
+  "dependencies": {
+    "typescript": "^5.8"
+  }
+}

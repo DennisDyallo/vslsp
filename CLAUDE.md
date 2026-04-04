@@ -1,6 +1,6 @@
 # vslsp — Agent Reference
 
-MCP server version: **1.1.0** | Tools: **9** | Languages: C#, Rust
+MCP server version: **1.1.0** | Tools: **9** | Languages: C#, Rust, TypeScript
 
 ## Installed Binaries
 
@@ -11,6 +11,7 @@ MCP server version: **1.1.0** | Tools: **9** | Languages: C#, Rust
 | OmniSharp (C#) | `~/.local/share/vslsp/omnisharp/OmniSharp` |
 | CodeMapper (C#) | `~/.local/share/vslsp/code-mapper/CodeMapper` |
 | RustMapper (Rust) | `~/.local/share/vslsp/rust-mapper/RustMapper` |
+| TSMapper (TypeScript) | `~/.local/share/vslsp/ts-mapper/TSMapper` |
 | MCP registered in | `~/.claude.json` under `mcpServers.vslsp` |
 
 ## Build Commands
@@ -30,6 +31,10 @@ dotnet publish tools/code-mapper/CodeMapper.csproj -c Release \
 
 # Rust RustMapper
 cargo build --release --manifest-path tools/rust-mapper/Cargo.toml
+
+# TypeScript TSMapper
+cd tools/ts-mapper && bun install
+bun build --compile tools/ts-mapper/main.ts --outfile TSMapper
 ```
 
 ## Key Files
@@ -48,7 +53,8 @@ cargo build --release --manifest-path tools/rust-mapper/Cargo.toml
 | `src/code-mapping/mapper.ts` | Routes `get_code_structure` by language, spawns binary |
 | `tools/code-mapper/Program.cs` | Roslyn AST walker — C# structure analysis |
 | `tools/rust-mapper/src/main.rs` | syn AST visitor — Rust structure analysis |
-| `.github/workflows/release.yml` | CI: build-bun, build-codemapper, build-rust-mapper, release jobs |
+| `tools/ts-mapper/main.ts` | TS Compiler API walker — TypeScript structure analysis |
+| `.github/workflows/release.yml` | CI: build-bun, build-codemapper, build-rust-mapper, build-ts-mapper, release jobs |
 | `install.sh` | Installer + `configure_mcp()` → `~/.claude.json` |
 
 ## MCP Tool Reference
@@ -92,7 +98,7 @@ get_rust_diagnostics(manifest, package?, file?, all_targets?)
 ```
 get_code_structure(path, format?, language?)
   → { output: string }  (JSON/text/yaml)
-  language: "csharp" | "rust" — auto-detected from file extensions if omitted
+  language: "csharp" | "rust" | "typescript" — auto-detected from file extensions if omitted
   path: directory or single file
 ```
 
@@ -128,7 +134,7 @@ Every member always emits all fields (no nulls):
 ```typescript
 {
   type: "Class"|"Struct"|"Enum"|"Variant"|"Field"|"Property"|"Method"|
-        "Constructor"|"Record"|"Interface"|"Trait"|"Impl"|"Fn"|"Mod"|"Namespace",
+        "Constructor"|"Record"|"Interface"|"Trait"|"Impl"|"Fn"|"Mod"|"Namespace"|"Type",
   signature: string,         // includes visibility + modifiers verbatim
   lineNumber: number,
   isStatic: boolean,
@@ -165,5 +171,6 @@ grep DEFAULT_PORT src/core/defaults.ts
 - `verify_changes` requires a running daemon — call `start_daemon` first, poll `get_daemon_status` until `ready: true`
 - `notify_file_changed` with `content` does in-memory update (no disk read); without `content` reads from disk
 - RustMapper binary is optional at install time — `get_code_structure` with `language: "rust"` fails with "binary not found" if absent
+- TSMapper binary is optional at install time — `get_code_structure` with `language: "typescript"` fails with "binary not found" if absent
 - Daemon default port: `7850` (see `src/core/defaults.ts`)
 - OmniSharp requires .NET 6.0+; RustMapper requires cargo in PATH at runtime

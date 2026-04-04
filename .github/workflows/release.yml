@@ -153,8 +153,48 @@ jobs:
           name: RustMapper-${{ matrix.suffix }}
           path: RustMapper-${{ matrix.suffix }}
 
+  build-ts-mapper:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: bun-linux-x64
+            suffix: linux-x64
+          - os: ubuntu-24.04-arm
+            target: bun-linux-arm64
+            suffix: linux-arm64
+          - os: macos-latest
+            target: bun-darwin-x64
+            suffix: darwin-x64
+          - os: macos-latest
+            target: bun-darwin-arm64
+            suffix: darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: cd tools/ts-mapper && bun install
+
+      - name: Build TSMapper
+        run: bun build --compile --minify --target=${{ matrix.target }} tools/ts-mapper/main.ts --outfile TSMapper-${{ matrix.suffix }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: TSMapper-${{ matrix.suffix }}
+          path: TSMapper-${{ matrix.suffix }}
+
   release:
-    needs: [build-bun, build-codemapper, build-rust-mapper]
+    needs: [build-bun, build-codemapper, build-rust-mapper, build-ts-mapper]
     runs-on: ubuntu-24.04
 
     steps:

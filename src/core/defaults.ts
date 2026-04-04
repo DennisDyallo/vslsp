@@ -36,3 +36,12 @@ export const DEFAULT_RUST_MAPPER = join(
   "rust-mapper",
   "RustMapper"
 );
+
+export const DEFAULT_TS_MAPPER = join(
+  process.env.HOME || "~",
+  ".local",
+  "share",
+  "vslsp",
+  "ts-mapper",
+  "TSMapper"
+);
