@@ -149,7 +149,7 @@ describe("MCP Server Handshake", () => {
     const info = client.getServerVersion();
     expect(info).toBeDefined();
     expect(info!.name).toBe("vslsp");
-    expect(info!.version).toBe("1.1.0");
+    expect(info!.version).toBe("1.1.1");
   });
 
   test("tools/list returns all expected tools with valid schemas", async () => {
@@ -551,4 +551,70 @@ describe("server error resilience", () => {
     const data = parseToolResult(statusResult);
     expect(data.status).toBe("not_running");
   });
+});
+
+// --- Daemon Lifecycle Integration (requires real .sln) ---
+
+describe("daemon lifecycle via MCP (integration)", () => {
+  const SLN = process.env.FIRST_RESPONDER_SLN;
+  const DAEMON_PORT = 17860; // dedicated port, avoids conflicts
+
+  if (!SLN) {
+    test.skip("FIRST_RESPONDER_SLN not set — skipping daemon lifecycle integration tests", () => {});
+    return;
+  }
+
+  // Derive CS_FILE from the SLN directory so the path is portable
+  const CS_FILE = process.env.FIRST_RESPONDER_CS_FILE ??
+    join(SLN.replace(/\/[^/]+\.sln$/, ""), "src/FirstResponder.Cli/Theme.cs");
+
+  test("start_daemon → ready → verify_changes → stop_daemon", async () => {
+    // Start daemon
+    const startResult = await client.callTool({
+      name: "start_daemon",
+      arguments: { solution: SLN, port: DAEMON_PORT },
+    });
+    expect(startResult.isError).toBeFalsy();
+    const startData = parseToolResult(startResult);
+    expect(startData.port).toBe(DAEMON_PORT);
+
+    // Poll until ready
+    const deadline = Date.now() + 120_000;
+    let ready = false;
+    while (Date.now() < deadline) {
+      const statusResult = await client.callTool({
+        name: "get_daemon_status",
+        arguments: { port: DAEMON_PORT },
+      });
+      const statusData = parseToolResult(statusResult);
+      if (statusData.ready === true) { ready = true; break; }
+      await Bun.sleep(2000);
+    }
+    expect(ready).toBe(true);
+
+    // verify_changes with a real .cs file
+    const { readFileSync } = await import("fs");
+    const content = readFileSync(CS_FILE, "utf8");
+    const verifyResult = await client.callTool({
+      name: "verify_changes",
+      arguments: {
+        changes: [{ file: CS_FILE, content }],
+        port: DAEMON_PORT,
+        settle_ms: 3000,
+        timeout_ms: 30000,
+      },
+    });
+    expect(verifyResult.isError).toBeFalsy();
+    const verifyData = parseToolResult(verifyResult);
+    expectDiagnosticsResultSchema(verifyData);
+
+    // Stop daemon
+    const stopResult = await client.callTool({
+      name: "stop_daemon",
+      arguments: { port: DAEMON_PORT },
+    });
+    expect(stopResult.isError).toBeFalsy();
+    const stopData = parseToolResult(stopResult);
+    expect(stopData.status).toBeDefined();
+  }, 150_000);
 });

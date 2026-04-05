@@ -3,6 +3,7 @@ import type { LSPClient } from "../core/lsp-client";
 import type { DiagnosticsStore } from "./store";
 import { existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
+import { log } from "../core/logger";
 
 export interface HttpServerOptions {
   port: number;
@@ -93,6 +94,7 @@ export function createHttpServer(options: HttpServerOptions) {
         return Response.json({ error: "Not found" }, { status: 404 });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        log("error", "http error", { path, message });
         return Response.json({ error: message }, { status: 500 });
       }
     },

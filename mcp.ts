@@ -11,6 +11,17 @@ import { matchFilePath, calculateSummary } from "./src/core/types";
 import { collectRustDiagnostics } from "./src/diagnostics/rust";
 import { collectTsDiagnostics } from "./src/diagnostics/typescript";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
+import { setLogLevel, log } from "./src/core/logger";
+
+// Parse --log-level flag
+const logLevelArg = process.argv.indexOf("--log-level");
+const VALID_LOG_LEVELS = ["error", "warn", "info", "debug"] as const;
+if (logLevelArg !== -1 && process.argv[logLevelArg + 1]) {
+  const lvl = process.argv[logLevelArg + 1];
+  if (VALID_LOG_LEVELS.includes(lvl as any)) {
+    setLogLevel(lvl as "error" | "warn" | "info" | "debug");
+  }
+}
 
 function ok(data: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -31,7 +42,7 @@ function acquireVerifyLock(): Promise<() => void> {
 
 const server = new McpServer({
   name: "vslsp",
-  version: "1.1.0",
+  version: "1.1.1",
 });
 
 // --- Diagnostics Tools ---
@@ -63,6 +74,7 @@ server.registerTool(
   },
   async ({ solution, file, timeout, quiet_period, use_daemon, port }) => {
     try {
+      log("info", "get_diagnostics", { solution, use_daemon, file });
       if (use_daemon) {
         const result = await query({ port, file, summary: false });
         return {
@@ -89,6 +101,7 @@ server.registerTool(
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
     } catch (e) {
+      log("error", "tool error", { tool: "get_diagnostics", message: e instanceof Error ? e.message : String(e) });
       return err(e instanceof Error ? e.message : String(e));
     }
   }
@@ -203,6 +216,7 @@ server.registerTool(
   },
   async ({ solution, port }) => {
     try {
+      log("info", "start_daemon", { solution, port });
       // Check if daemon is already running
       try {
         const existing = await status(port);
@@ -228,6 +242,7 @@ server.registerTool(
         return ok({ status: "starting", port, solution, ready: false, message: "Initial analysis in progress. Poll get_daemon_status until ready=true." });
       }
     } catch (e) {
+      log("error", "tool error", { tool: "start_daemon", message: e instanceof Error ? e.message : String(e) });
       return err(e instanceof Error ? e.message : String(e));
     }
   }
@@ -354,6 +369,7 @@ server.registerTool(
   async ({ changes, settle_ms, timeout_ms, port }) => {
     const release = await acquireVerifyLock();
     try {
+      log("info", "verify_changes", { files: changes.map(c => c.file).join(", ") });
       // 1. Apply each change via in-memory notify (didChange)
       const paths: string[] = [];
       for (const c of changes) {
@@ -403,6 +419,7 @@ server.registerTool(
 
       return ok({ ...data, verified_files: paths, reverted: true });
     } catch (e) {
+      log("error", "tool error", { tool: "verify_changes", message: e instanceof Error ? e.message : String(e) });
       return err(e instanceof Error ? e.message : String(e));
     } finally {
       release();
