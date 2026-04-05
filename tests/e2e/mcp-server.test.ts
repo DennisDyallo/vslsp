@@ -11,7 +11,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { resolve, join } from "path";
-import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
+import { DEFAULT_TS_MAPPER, DEFAULT_RUST_MAPPER } from "../../src/core/defaults";
 
 const PROJECT_ROOT = resolve(import.meta.dir, "../..");
 const MCP_ENTRY = join(PROJECT_ROOT, "mcp.ts");
@@ -346,6 +347,10 @@ describe("get_diagnostics_summary via MCP", () => {
 
 describe("get_code_structure via MCP", () => {
   test("analyzes TypeScript file and returns CodeMember schema", async () => {
+    if (!existsSync(DEFAULT_TS_MAPPER)) {
+      console.warn("TSMapper binary not installed, skipping");
+      return;
+    }
     const result = await client.callTool({
       name: "get_code_structure",
       arguments: {
@@ -393,6 +398,10 @@ describe("get_code_structure via MCP", () => {
   }, 30_000);
 
   test("analyzes Rust file and returns CodeMember schema", async () => {
+    if (!existsSync(DEFAULT_RUST_MAPPER)) {
+      console.warn("RustMapper binary not installed, skipping");
+      return;
+    }
     const result = await client.callTool({
       name: "get_code_structure",
       arguments: {
@@ -423,6 +432,10 @@ describe("get_code_structure via MCP", () => {
   }, 30_000);
 
   test("auto-detects language from file extension", async () => {
+    if (!existsSync(DEFAULT_TS_MAPPER)) {
+      console.warn("TSMapper binary not installed, skipping");
+      return;
+    }
     const result = await client.callTool({
       name: "get_code_structure",
       arguments: {
