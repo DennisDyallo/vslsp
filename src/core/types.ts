@@ -56,6 +56,22 @@ export function matchFilePath(filePath: string, filter: string): boolean {
   return fp === norm || fp.endsWith("/" + norm);
 }
 
+/** Calculate summary counts from a list of file diagnostics. */
+export function calculateSummary(files: FileDiagnostics[]): DiagnosticSummary {
+  const summary: DiagnosticSummary = { errors: 0, warnings: 0, info: 0, hints: 0 };
+  for (const file of files) {
+    for (const diag of file.diagnostics) {
+      switch (diag.severity) {
+        case "error": summary.errors++; break;
+        case "warning": summary.warnings++; break;
+        case "hint": summary.hints++; break;
+        default: summary.info++; break;
+      }
+    }
+  }
+  return summary;
+}
+
 export function diagnosticToEntry(diag: Diagnostic): DiagnosticEntry {
   let code: string | number | undefined;
   if (diag.code !== undefined) {

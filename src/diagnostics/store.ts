@@ -6,6 +6,7 @@ import {
   type DiagnosticSummary,
   diagnosticToEntry,
   matchFilePath,
+  calculateSummary,
 } from "../core/types";
 
 export class DiagnosticsStore {
@@ -49,13 +50,13 @@ export class DiagnosticsStore {
     const result = this.buildResult();
     result.files = result.files.filter((f) => matchFilePath(f.path, filePath));
     // Recalculate summary for filtered files
-    result.summary = this.calculateSummary(result.files);
+    result.summary = calculateSummary(result.files);
     result.clean = result.summary.errors === 0;
     return result;
   }
 
   getSummary(): DiagnosticSummary & { clean: boolean; fileCount: number; lastUpdate: string } {
-    const summary = this.calculateSummary(Array.from(this.diagnosticsMap.values()));
+    const summary = calculateSummary(Array.from(this.diagnosticsMap.values()));
     return {
       ...summary,
       clean: summary.errors === 0,
@@ -82,7 +83,7 @@ export class DiagnosticsStore {
       .filter((f) => f.diagnostics.length > 0)
       .sort((a, b) => a.path.localeCompare(b.path));
 
-    const summary = this.calculateSummary(files);
+    const summary = calculateSummary(files);
 
     return {
       solution: this.solutionPath,
@@ -93,25 +94,4 @@ export class DiagnosticsStore {
     };
   }
 
-  private calculateSummary(files: FileDiagnostics[]): DiagnosticSummary {
-    const summary: DiagnosticSummary = {
-      errors: 0,
-      warnings: 0,
-      info: 0,
-      hints: 0,
-    };
-
-    for (const file of files) {
-      for (const diag of file.diagnostics) {
-        switch (diag.severity) {
-          case "error": summary.errors++; break;
-          case "warning": summary.warnings++; break;
-          case "info": summary.info++; break;
-          case "hint": summary.hints++; break;
-        }
-      }
-    }
-
-    return summary;
-  }
 }

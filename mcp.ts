@@ -7,7 +7,7 @@ import { readFileSync } from "fs";
 import { DiagnosticsCollector } from "./src/diagnostics/collector";
 import { query, status, notify, stop } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
-import { matchFilePath } from "./src/core/types";
+import { matchFilePath, calculateSummary } from "./src/core/types";
 import { collectRustDiagnostics } from "./src/diagnostics/rust";
 import { collectTsDiagnostics } from "./src/diagnostics/typescript";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
@@ -81,12 +81,7 @@ server.registerTool(
 
       if (file) {
         result.files = result.files.filter((f) => matchFilePath(f.path, file));
-        result.summary = { errors: 0, warnings: 0, info: 0, hints: 0 };
-        for (const f of result.files) {
-          for (const d of f.diagnostics) {
-            result.summary[d.severity === "error" ? "errors" : d.severity === "warning" ? "warnings" : d.severity === "hint" ? "hints" : "info"]++;
-          }
-        }
+        result.summary = calculateSummary(result.files);
         result.clean = result.summary.errors === 0;
       }
 
@@ -402,12 +397,7 @@ server.registerTool(
         data.files = data.files.filter((f: any) =>
           paths.some((p) => f.path === p || f.path.endsWith("/" + p.split("/").pop()!))
         );
-        data.summary = { errors: 0, warnings: 0, info: 0, hints: 0 };
-        for (const f of data.files) {
-          for (const d of f.diagnostics) {
-            data.summary[d.severity === "error" ? "errors" : d.severity === "warning" ? "warnings" : d.severity === "hint" ? "hints" : "info"]++;
-          }
-        }
+        data.summary = calculateSummary(data.files);
         data.clean = data.summary.errors === 0;
       }
 
@@ -483,7 +473,7 @@ server.registerTool(
       "Returns the same structured schema as get_diagnostics for C# and get_rust_diagnostics: " +
       "file paths, line numbers, column numbers, error codes (e.g. TS2322), and severity. " +
       "Use to find all type errors before or after editing TypeScript source files. " +
-      "Requires tsconfig.json in the target directory and tsc in PATH.",
+      "Requires tsconfig.json in the target directory and bun in PATH (uses bunx to resolve tsc).",
     inputSchema: {
       project: z.string().describe(
         "Path to tsconfig.json or directory containing one."
