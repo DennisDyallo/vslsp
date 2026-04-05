@@ -395,7 +395,7 @@ server.registerTool(
       const data = result.data;
       if (data.files) {
         data.files = data.files.filter((f: any) =>
-          paths.some((p) => f.path === p || f.path.endsWith("/" + p.split("/").pop()!))
+          paths.some((p) => matchFilePath(f.path, p))
         );
         data.summary = calculateSummary(data.files);
         data.clean = data.summary.errors === 0;
