@@ -8,6 +8,8 @@ import {
   diagnosticToEntry,
 } from "../core/types";
 import { fileURLToPath } from "url";
+import { existsSync } from "fs";
+import { resolve } from "path";
 
 export class DiagnosticsCollector {
   private client: LSPClient;
@@ -21,6 +23,11 @@ export class DiagnosticsCollector {
   }
 
   async collect(): Promise<DiagnosticsResult> {
+    const solutionPath = resolve(this.options.solutionPath);
+    if (!existsSync(solutionPath)) {
+      throw new Error(`Solution file not found: ${solutionPath}`);
+    }
+
     this.client.onDiagnostics((params) => this.handleDiagnostics(params));
 
     await this.client.start();

@@ -65,10 +65,17 @@ export class LSPClient {
       if (text) console.error(`[LSP/stderr] ${text}`);
     });
 
+    let spawnReject!: (err: Error) => void;
+    const spawnFailed = new Promise<never>((_, reject) => {
+      spawnReject = reject;
+    });
+
     this.process.on("error", (err) => {
       console.error(`[LSP] OmniSharp process error: ${err.message}`);
       this._isReady = false;
-      this.readyReject?.(new Error(`OmniSharp process error: ${err.message}`));
+      const error = new Error(`OmniSharp process error: ${err.message}`);
+      this.readyReject?.(error);
+      spawnReject(error);
     });
 
     this.connection = createMessageConnection(
@@ -83,7 +90,15 @@ export class LSPClient {
 
     this.connection.listen();
 
-    await this.initialize();
+    // Race initialize() against spawn error — if OmniSharp fails to start,
+    // spawnFailed rejects immediately and we propagate the error instead of
+    // sending requests on dead streams (which would crash the MCP server).
+    const initPromise = this.initialize();
+    await Promise.race([initPromise, spawnFailed]);
+    // Suppress the eventual rejection of initPromise if spawnFailed won the race
+    initPromise.catch(() => {});
+    // Suppress the rejection of spawnFailed if initPromise won the race
+    spawnFailed.catch(() => {});
   }
 
   markReady(): void {

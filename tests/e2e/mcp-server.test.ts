@@ -279,14 +279,12 @@ describe("get_rust_diagnostics via MCP", () => {
 });
 
 // --- C# Diagnostics ---
-// NOTE: get_diagnostics with a nonexistent .sln crashes the MCP server process
-// because LSPClient.start() doesn't race the spawn error against initialize().
-// This is a known bug — spawn("OmniSharp") emits "error" but initialize() then
-// tries sendRequest on dead streams, causing an unhandled exception.
-// Skipping the error-path test here; the bug should be fixed in lsp-client.ts.
+// NOTE: get_diagnostics with a nonexistent .sln previously crashed the MCP server.
+// The bug in LSPClient.start() has been fixed — spawn errors are now raced against
+// initialize() so invalid .sln paths return a proper error response.
 
 describe("get_diagnostics via MCP", () => {
-  test.skip("returns error for nonexistent .sln file (KNOWN BUG: crashes server)", async () => {
+  test("returns error for nonexistent .sln file", async () => {
     const result = await client.callTool({
       name: "get_diagnostics",
       arguments: {
@@ -299,6 +297,37 @@ describe("get_diagnostics via MCP", () => {
     expect(result.isError).toBe(true);
     const data = parseToolResult(result);
     expect(data.error).toBeTruthy();
+  }, 30_000);
+});
+
+// --- C# Diagnostics Summary ---
+
+describe("get_diagnostics_summary via MCP", () => {
+  test("returns error for nonexistent .sln file", async () => {
+    const result = await client.callTool({
+      name: "get_diagnostics_summary",
+      arguments: { solution: "/nonexistent/solution.sln" },
+    });
+
+    expect(result.isError).toBe(true);
+    const data = parseToolResult(result);
+    expect(data.error).toBeTruthy();
+  }, 30_000);
+
+  test("server survives get_diagnostics_summary error and handles subsequent calls", async () => {
+    const errorResult = await client.callTool({
+      name: "get_diagnostics_summary",
+      arguments: { solution: "/nonexistent/summary.sln" },
+    });
+    expect(errorResult.isError).toBe(true);
+
+    // Server must still respond to subsequent calls
+    const statusResult = await client.callTool({
+      name: "get_daemon_status",
+      arguments: { port: 17852 },
+    });
+    const data = parseToolResult(statusResult);
+    expect(data.status).toBe("not_running");
   }, 30_000);
 });
 

@@ -193,8 +193,29 @@ jobs:
           name: TSMapper-${{ matrix.suffix }}
           path: TSMapper-${{ matrix.suffix }}
 
+  test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run tests
+        run: bun test --timeout 60000
+
   release:
-    needs: [build-bun, build-codemapper, build-rust-mapper, build-ts-mapper]
+    needs: [build-bun, build-codemapper, build-rust-mapper, build-ts-mapper, test]
     runs-on: ubuntu-24.04
 
     steps:
