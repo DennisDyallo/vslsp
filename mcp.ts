@@ -12,6 +12,7 @@ import { collectRustDiagnostics } from "./src/diagnostics/rust";
 import { collectTsDiagnostics } from "./src/diagnostics/typescript";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
 import { setLogLevel, getLogLevel, log } from "./src/core/logger";
+import pkg from "./package.json";
 
 // Parse --log-level flag
 const logLevelArg = process.argv.indexOf("--log-level");
@@ -42,7 +43,7 @@ function acquireVerifyLock(): Promise<() => void> {
 
 const server = new McpServer({
   name: "vslsp",
-  version: "1.1.1",
+  version: pkg.version,
 });
 
 // --- Diagnostics Tools ---

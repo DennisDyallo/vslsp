@@ -13,6 +13,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { resolve, join } from "path";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { DEFAULT_TS_MAPPER, DEFAULT_RUST_MAPPER } from "../../src/core/defaults";
+import pkg from "../../package.json";
 
 const PROJECT_ROOT = resolve(import.meta.dir, "../..");
 const MCP_ENTRY = join(PROJECT_ROOT, "mcp.ts");
@@ -161,7 +162,7 @@ describe("MCP Server Handshake", () => {
     const info = client.getServerVersion();
     expect(info).toBeDefined();
     expect(info!.name).toBe("vslsp");
-    expect(info!.version).toBe("1.1.1");
+    expect(info!.version).toBe(pkg.version);
   });
 
   test("tools/list returns all expected tools with valid schemas", async () => {
