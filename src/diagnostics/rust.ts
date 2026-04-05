@@ -1,6 +1,6 @@
 import { resolve, join } from "path";
 import { existsSync } from "fs";
-import type { DiagnosticsResult, FileDiagnostics, DiagnosticEntry, DiagnosticSummary } from "../core/types";
+import { type DiagnosticsResult, type FileDiagnostics, type DiagnosticEntry, type DiagnosticSummary, matchFilePath } from "../core/types";
 
 export interface RustDiagnosticsOptions {
   manifest: string;
@@ -91,11 +91,7 @@ export async function collectRustDiagnostics(
 
   // Apply optional file filter (match by suffix or full path)
   if (options.file) {
-    const norm = options.file.replace(/\\/g, "/");
-    files = files.filter((f) => {
-      const fp = f.path.replace(/\\/g, "/");
-      return fp === norm || fp.endsWith("/" + norm) || fp.endsWith(norm);
-    });
+    files = files.filter((f) => matchFilePath(f.path, options.file!));
   }
 
   const summary: DiagnosticSummary = { errors: 0, warnings: 0, info: 0, hints: 0 };

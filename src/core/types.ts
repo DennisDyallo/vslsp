@@ -49,6 +49,13 @@ export function severityToString(severity: DiagnosticSeverity | undefined): Diag
   }
 }
 
+/** Match a file path by exact match or path-separated suffix. */
+export function matchFilePath(filePath: string, filter: string): boolean {
+  const fp = filePath.replace(/\\/g, "/");
+  const norm = filter.replace(/\\/g, "/");
+  return fp === norm || fp.endsWith("/" + norm);
+}
+
 export function diagnosticToEntry(diag: Diagnostic): DiagnosticEntry {
   let code: string | number | undefined;
   if (diag.code !== undefined) {

@@ -1,6 +1,6 @@
 # vslsp — Agent Reference
 
-MCP server version: **1.1.0** | Tools: **9** | Languages: C#, Rust, TypeScript
+MCP server version: **1.1.0** | Tools: **10** | Languages: C#, Rust, TypeScript
 
 ## Installed Binaries
 
@@ -41,7 +41,7 @@ bun build --compile tools/ts-mapper/main.ts --outfile TSMapper
 
 | File | Owns |
 |------|------|
-| `mcp.ts` | All 9 MCP tool registrations, tool schemas, version string |
+| `mcp.ts` | All 10 MCP tool registrations, tool schemas, version string |
 | `vslsp.ts` | CLI entry point |
 | `src/core/types.ts` | `DiagnosticsResult`, `DiagnosticEntry`, shared types |
 | `src/core/defaults.ts` | `DEFAULT_PORT`, `DEFAULT_VSLSP`, `DEFAULT_OMNISHARP`, binary paths |
@@ -49,6 +49,7 @@ bun build --compile tools/ts-mapper/main.ts --outfile TSMapper
 | `src/diagnostics/client.ts` | HTTP client for daemon (query/notify/stop/status) |
 | `src/diagnostics/http.ts` | Daemon HTTP server |
 | `src/diagnostics/rust.ts` | `collectRustDiagnostics()` via `cargo check --message-format=json` |
+| `src/diagnostics/typescript.ts` | `collectTsDiagnostics()` via `tsc --noEmit` |
 | `src/code-mapping/registry.ts` | Language registry — add entries here for new languages |
 | `src/code-mapping/mapper.ts` | Routes `get_code_structure` by language, spawns binary |
 | `tools/code-mapper/Program.cs` | Roslyn AST walker — C# structure analysis |
@@ -93,6 +94,14 @@ get_rust_diagnostics(manifest, package?, file?, all_targets?)
   manifest: path to Cargo.toml or directory containing one
 ```
 
+### TypeScript Diagnostics
+
+```
+get_ts_diagnostics(project, file?)
+  → DiagnosticsResult
+  project: path to tsconfig.json or directory containing one
+```
+
 ### Code Structure
 
 ```
@@ -121,7 +130,7 @@ get_code_structure(path, format?, language?)
       endColumn: number,
       message: string,
       code: string,          // "CS1002", "E0596", etc.
-      source: string,        // "csharp" or "rustc"
+      source: string,        // "csharp", "rustc", or "tsc"
     }]
   }]
 }
@@ -149,7 +158,7 @@ Every member always emits all fields (no nulls):
 ## Verify Correctness
 
 ```bash
-# Tool count (must be 9)
+# Tool count (must be 10)
 grep -c "registerTool" mcp.ts
 
 # TypeScript clean
@@ -173,4 +182,5 @@ grep DEFAULT_PORT src/core/defaults.ts
 - RustMapper binary is optional at install time — `get_code_structure` with `language: "rust"` fails with "binary not found" if absent
 - TSMapper binary is optional at install time — `get_code_structure` with `language: "typescript"` fails with "binary not found" if absent
 - Daemon default port: `7850` (see `src/core/defaults.ts`)
-- OmniSharp requires .NET 6.0+; RustMapper requires cargo in PATH at runtime
+- Daemon binds to `127.0.0.1` only (localhost) — not accessible from LAN
+- OmniSharp requires .NET 6.0+; RustMapper requires cargo in PATH; tsc required for TS diagnostics

@@ -2,6 +2,7 @@ import type { Server } from "bun";
 import type { LSPClient } from "../core/lsp-client";
 import type { DiagnosticsStore } from "./store";
 import { existsSync, readFileSync } from "fs";
+import { fileURLToPath } from "url";
 
 export interface HttpServerOptions {
   port: number;
@@ -14,27 +15,17 @@ export function createHttpServer(options: HttpServerOptions) {
   const { port, client, store, solutionPath } = options;
 
   return Bun.serve({
+    hostname: "127.0.0.1",
     port,
     async fetch(req) {
       const url = new URL(req.url);
       const path = url.pathname;
       const method = req.method;
 
-      // CORS headers for local development
-      const corsHeaders = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-      };
-
-      if (method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: corsHeaders });
-      }
-
       try {
         // GET /health
         if (method === "GET" && path === "/health") {
-          return Response.json({ status: "ok", pid: process.pid }, { headers: corsHeaders });
+          return Response.json({ status: "ok", pid: process.pid });
         }
 
         // GET /status
@@ -44,19 +35,19 @@ export function createHttpServer(options: HttpServerOptions) {
             ready: client.isReady,
             updateCount: store.getUpdateCount(),
             lastUpdate: new Date(store.getLastUpdate()).toISOString(),
-          }, { headers: corsHeaders });
+          });
         }
 
         // GET /diagnostics
         if (method === "GET" && path === "/diagnostics") {
           const file = url.searchParams.get("file");
           const result = file ? store.getByFile(file) : store.getAll();
-          return Response.json(result, { headers: corsHeaders });
+          return Response.json(result);
         }
 
         // GET /diagnostics/summary
         if (method === "GET" && path === "/diagnostics/summary") {
-          return Response.json(store.getSummary(), { headers: corsHeaders });
+          return Response.json(store.getSummary());
         }
 
         // POST /file-changed - notify file saved on disk
@@ -64,16 +55,16 @@ export function createHttpServer(options: HttpServerOptions) {
           const body = await req.json() as { uri?: string; path?: string };
           const filePath = body.uri || body.path;
           if (!filePath) {
-            return Response.json({ error: "Missing 'uri' or 'path' in body" }, { status: 400, headers: corsHeaders });
+            return Response.json({ error: "Missing 'uri' or 'path' in body" }, { status: 400 });
           }
 
-          const normalizedPath = filePath.startsWith("file://") ? filePath.slice(7) : filePath;
+          const normalizedPath = filePath.startsWith("file://") ? fileURLToPath(filePath) : filePath;
           if (!existsSync(normalizedPath)) {
-            return Response.json({ error: `File not found: ${normalizedPath}` }, { status: 404, headers: corsHeaders });
+            return Response.json({ error: `File not found: ${normalizedPath}` }, { status: 404 });
           }
 
           await client.didSave(normalizedPath);
-          return Response.json({ ok: true, action: "didSave", path: normalizedPath }, { headers: corsHeaders });
+          return Response.json({ ok: true, action: "didSave", path: normalizedPath });
         }
 
         // POST /file-content - send content change without saving
@@ -81,28 +72,28 @@ export function createHttpServer(options: HttpServerOptions) {
           const body = await req.json() as { uri?: string; path?: string; content: string };
           const filePath = body.uri || body.path;
           if (!filePath) {
-            return Response.json({ error: "Missing 'uri' or 'path' in body" }, { status: 400, headers: corsHeaders });
+            return Response.json({ error: "Missing 'uri' or 'path' in body" }, { status: 400 });
           }
           if (typeof body.content !== "string") {
-            return Response.json({ error: "Missing 'content' in body" }, { status: 400, headers: corsHeaders });
+            return Response.json({ error: "Missing 'content' in body" }, { status: 400 });
           }
 
-          const normalizedPath = filePath.startsWith("file://") ? filePath.slice(7) : filePath;
+          const normalizedPath = filePath.startsWith("file://") ? fileURLToPath(filePath) : filePath;
           await client.didChange(normalizedPath, body.content);
-          return Response.json({ ok: true, action: "didChange", path: normalizedPath }, { headers: corsHeaders });
+          return Response.json({ ok: true, action: "didChange", path: normalizedPath });
         }
 
         // POST /stop
         if (method === "POST" && path === "/stop") {
           setTimeout(() => process.exit(0), 100);
-          return Response.json({ ok: true, message: "Daemon stopping" }, { headers: corsHeaders });
+          return Response.json({ ok: true, message: "Daemon stopping" });
         }
 
         // 404 for unknown routes
-        return Response.json({ error: "Not found" }, { status: 404, headers: corsHeaders });
+        return Response.json({ error: "Not found" }, { status: 404 });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return Response.json({ error: message }, { status: 500, headers: corsHeaders });
+        return Response.json({ error: message }, { status: 500 });
       }
     },
   });

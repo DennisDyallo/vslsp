@@ -30,6 +30,7 @@ export class LSPClient {
   private _isReady: boolean = false;
   private readyPromise: Promise<void> | null = null;
   private readyResolve: (() => void) | null = null;
+  private readyReject: ((err: Error) => void) | null = null;
 
   constructor(private options: LSPClientOptions) {}
 
@@ -46,8 +47,9 @@ export class LSPClient {
   async start(): Promise<void> {
     const args = ["-lsp", "-s", this.options.solutionPath];
 
-    this.readyPromise = new Promise((resolve) => {
+    this.readyPromise = new Promise((resolve, reject) => {
       this.readyResolve = resolve;
+      this.readyReject = reject;
     });
 
     this.process = spawn(this.options.omnisharpPath, args, {
@@ -59,11 +61,14 @@ export class LSPClient {
     }
 
     this.process.stderr?.on("data", (data) => {
-      // Could log to file for debugging
+      const text = data.toString().trim();
+      if (text) console.error(`[LSP/stderr] ${text}`);
     });
 
     this.process.on("error", (err) => {
-      throw new Error(`OmniSharp process error: ${err.message}`);
+      console.error(`[LSP] OmniSharp process error: ${err.message}`);
+      this._isReady = false;
+      this.readyReject?.(new Error(`OmniSharp process error: ${err.message}`));
     });
 
     this.connection = createMessageConnection(

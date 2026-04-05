@@ -5,6 +5,7 @@ import {
   type FileDiagnostics,
   type DiagnosticSummary,
   diagnosticToEntry,
+  matchFilePath,
 } from "../core/types";
 
 export class DiagnosticsStore {
@@ -45,12 +46,8 @@ export class DiagnosticsStore {
   }
 
   getByFile(filePath: string): DiagnosticsResult {
-    const normalizedPath = filePath.replace(/\\/g, "/");
     const result = this.buildResult();
-    result.files = result.files.filter((f) => {
-      const fPath = f.path.replace(/\\/g, "/");
-      return fPath === normalizedPath || fPath.endsWith(normalizedPath);
-    });
+    result.files = result.files.filter((f) => matchFilePath(f.path, filePath));
     // Recalculate summary for filtered files
     result.summary = this.calculateSummary(result.files);
     result.clean = result.summary.errors === 0;

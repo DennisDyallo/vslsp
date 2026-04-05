@@ -7,7 +7,9 @@ import { readFileSync } from "fs";
 import { DiagnosticsCollector } from "./src/diagnostics/collector";
 import { query, status, notify, stop } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
+import { matchFilePath } from "./src/core/types";
 import { collectRustDiagnostics } from "./src/diagnostics/rust";
+import { collectTsDiagnostics } from "./src/diagnostics/typescript";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
 
 function ok(data: Record<string, unknown>) {
@@ -16,6 +18,15 @@ function ok(data: Record<string, unknown>) {
 
 function err(message: string) {
   return { content: [{ type: "text" as const, text: JSON.stringify({ error: message }, null, 2) }], isError: true };
+}
+
+// Concurrency guard for verify_changes — prevents parallel calls from corrupting daemon state
+let verifyLockChain: Promise<void> = Promise.resolve();
+function acquireVerifyLock(): Promise<() => void> {
+  let release: () => void;
+  const prev = verifyLockChain;
+  verifyLockChain = new Promise((r) => { release = r; });
+  return prev.then(() => release!);
 }
 
 const server = new McpServer({
@@ -69,11 +80,7 @@ server.registerTool(
       const result = await collector.collect();
 
       if (file) {
-        const normalizedFile = file.replace(/\\/g, "/");
-        result.files = result.files.filter((f) => {
-          const fPath = f.path.replace(/\\/g, "/");
-          return fPath === normalizedFile || fPath.endsWith(normalizedFile);
-        });
+        result.files = result.files.filter((f) => matchFilePath(f.path, file));
         result.summary = { errors: 0, warnings: 0, info: 0, hints: 0 };
         for (const f of result.files) {
           for (const d of f.diagnostics) {
@@ -350,6 +357,7 @@ server.registerTool(
     },
   },
   async ({ changes, settle_ms, timeout_ms, port }) => {
+    const release = await acquireVerifyLock();
     try {
       // 1. Apply each change via in-memory notify (didChange)
       const paths: string[] = [];
@@ -392,7 +400,7 @@ server.registerTool(
       const data = result.data;
       if (data.files) {
         data.files = data.files.filter((f: any) =>
-          paths.some((p) => f.path === p || f.path.endsWith(p.split("/").pop()!))
+          paths.some((p) => f.path === p || f.path.endsWith("/" + p.split("/").pop()!))
         );
         data.summary = { errors: 0, warnings: 0, info: 0, hints: 0 };
         for (const f of data.files) {
@@ -406,6 +414,8 @@ server.registerTool(
       return ok({ ...data, verified_files: paths, reverted: true });
     } catch (e) {
       return err(e instanceof Error ? e.message : String(e));
+    } finally {
+      release();
     }
   }
 );
@@ -454,6 +464,45 @@ server.registerTool(
         file,
         allTargets: all_targets,
       });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    } catch (e) {
+      return err(e instanceof Error ? e.message : String(e));
+    }
+  }
+);
+
+// --- TypeScript Diagnostics ---
+
+server.registerTool(
+  "get_ts_diagnostics",
+  {
+    title: "Get TypeScript Diagnostics",
+    description:
+      "Get TypeScript compilation diagnostics by running tsc --noEmit. " +
+      "No daemon required — spawns tsc directly. " +
+      "Returns the same structured schema as get_diagnostics for C# and get_rust_diagnostics: " +
+      "file paths, line numbers, column numbers, error codes (e.g. TS2322), and severity. " +
+      "Use to find all type errors before or after editing TypeScript source files. " +
+      "Requires tsconfig.json in the target directory and tsc in PATH.",
+    inputSchema: {
+      project: z.string().describe(
+        "Path to tsconfig.json or directory containing one."
+      ),
+      file: z.string().optional().describe(
+        "Filter diagnostics to a specific .ts/.tsx source file path."
+      ),
+    },
+    annotations: {
+      title: "Get TypeScript Diagnostics",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({ project, file }) => {
+    try {
+      const result = await collectTsDiagnostics({ project, file });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
       return err(e instanceof Error ? e.message : String(e));

@@ -1,12 +1,13 @@
 {
   "name": "vslsp",
-  "version": "0.4.0",
-  "description": "C# and Rust LSP Diagnostics and Code Structure Tool for AI Agents",
+  "version": "1.1.0",
+  "description": "C#, Rust, and TypeScript LSP Diagnostics and Code Structure Tool for AI Agents",
   "module": "vslsp.ts",
   "type": "module",
   "private": true,
   "scripts": {
     "start": "bun run vslsp.ts",
+    "test": "bun test",
     "download-omnisharp": "bun run scripts/download-omnisharp.ts",
     "postinstall": "bun run scripts/download-omnisharp.ts"
   },
