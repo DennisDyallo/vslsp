@@ -121,12 +121,23 @@ beforeAll(async () => {
     `export function add(a: number, b: number): number {\n  return a + b;\n}\n`
   );
 
-  // Spawn MCP server and connect
+  // Spawn MCP server and connect.
+  // StdioClientTransport strips most env vars by design (security isolation).
+  // Explicitly forward DOTNET_ROOT so OmniSharp can find the .NET runtime for
+  // C# daemon tools (the daemon lifecycle integration test requires this).
   transport = new StdioClientTransport({
     command: "bun",
     args: ["run", MCP_ENTRY],
     cwd: PROJECT_ROOT,
     stderr: "pipe",
+    env: {
+      HOME: process.env.HOME ?? "",
+      PATH: process.env.PATH ?? "",
+      USER: process.env.USER ?? "",
+      SHELL: process.env.SHELL ?? "",
+      DOTNET_ROOT: process.env.DOTNET_ROOT ?? "",
+      DOTNET_INSTALL_DIR: process.env.DOTNET_INSTALL_DIR ?? "",
+    },
   });
 
   client = new Client({ name: "e2e-test-client", version: "1.0.0" });

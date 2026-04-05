@@ -8,6 +8,10 @@ export function setLogLevel(level: LogLevel) {
   currentLevel = level;
 }
 
+export function getLogLevel(): LogLevel {
+  return currentLevel;
+}
+
 export function log(level: LogLevel, msg: string, extra?: Record<string, unknown>) {
   if (LEVELS[level] > LEVELS[currentLevel]) return;
   // Spread extra after reserved fields so callers cannot overwrite level/ts/msg

@@ -11,7 +11,7 @@ import { matchFilePath, calculateSummary } from "./src/core/types";
 import { collectRustDiagnostics } from "./src/diagnostics/rust";
 import { collectTsDiagnostics } from "./src/diagnostics/typescript";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
-import { setLogLevel, log } from "./src/core/logger";
+import { setLogLevel, getLogLevel, log } from "./src/core/logger";
 
 // Parse --log-level flag
 const logLevelArg = process.argv.indexOf("--log-level");
@@ -226,10 +226,17 @@ server.registerTool(
       }
 
       // Spawn daemon as detached subprocess using absolute path (avoids PATH issues in MCP context)
-      Bun.spawn([DEFAULT_VSLSP, "serve", "--solution", solution, "--port", String(port)], {
+      // Forward --log-level so the daemon writes structured logs at the same level as the MCP server
+      const spawnArgs = [DEFAULT_VSLSP, "serve", "--solution", solution, "--port", String(port)];
+      const lvl = getLogLevel();
+      if (lvl !== "error") spawnArgs.push("--log-level", lvl);
+      // Explicitly pass process.env — Bun compiled binaries do not always propagate
+      // the full environment to grandchild processes (e.g. DOTNET_ROOT for OmniSharp).
+      Bun.spawn(spawnArgs, {
         stdout: "ignore",
         stderr: "ignore",
         stdin: "ignore",
+        env: process.env,
       });
 
       // Wait a moment for it to start, then check status
@@ -368,10 +375,10 @@ server.registerTool(
   },
   async ({ changes, settle_ms, timeout_ms, port }) => {
     const release = await acquireVerifyLock();
+    const paths: string[] = [];
     try {
       log("info", "verify_changes", { files: changes.map(c => c.file).join(", ") });
       // 1. Apply each change via in-memory notify (didChange)
-      const paths: string[] = [];
       for (const c of changes) {
         await notify({ port, file: c.file, content: c.content });
         paths.push(c.file);
@@ -419,6 +426,15 @@ server.registerTool(
 
       return ok({ ...data, verified_files: paths, reverted: true });
     } catch (e) {
+      // Best-effort revert: restore disk content for any files applied before the failure
+      for (const filePath of paths) {
+        try {
+          const diskContent = readFileSync(filePath, "utf-8");
+          await notify({ port, file: filePath, content: diskContent });
+        } catch {
+          // Ignore — daemon may not be running; OmniSharp will reconcile on next didSave
+        }
+      }
       log("error", "tool error", { tool: "verify_changes", message: e instanceof Error ? e.message : String(e) });
       return err(e instanceof Error ? e.message : String(e));
     } finally {

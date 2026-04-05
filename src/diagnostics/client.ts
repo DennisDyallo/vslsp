@@ -33,7 +33,7 @@ export interface StatusResult {
 
 function connectionError(port: number): never {
   const err = new Error(
-    `Cannot connect to vslsp daemon at localhost:${port}. ` +
+    `Cannot connect to vslsp daemon at 127.0.0.1:${port}. ` +
     "Is the daemon running? Start it with: vslsp serve --solution <path.sln>"
   );
   (err as any).code = "DAEMON_NOT_RUNNING";
@@ -48,7 +48,7 @@ function isConnectionError(err: unknown): boolean {
 }
 
 export async function query(options: QueryOptions): Promise<QueryResult> {
-  const baseUrl = `http://localhost:${options.port}`;
+  const baseUrl = `http://127.0.0.1:${options.port}`;
 
   try {
     let endpoint = "/diagnostics";
@@ -76,7 +76,7 @@ export async function query(options: QueryOptions): Promise<QueryResult> {
 }
 
 export async function status(port: number): Promise<StatusResult> {
-  const baseUrl = `http://localhost:${port}`;
+  const baseUrl = `http://127.0.0.1:${port}`;
 
   try {
     const response = await fetch(`${baseUrl}/status`);
@@ -94,7 +94,7 @@ export async function status(port: number): Promise<StatusResult> {
 }
 
 export async function stop(port: number): Promise<void> {
-  const baseUrl = `http://localhost:${port}`;
+  const baseUrl = `http://127.0.0.1:${port}`;
   try {
     await fetch(`${baseUrl}/stop`, { method: "POST" });
   } catch (err) {
@@ -104,7 +104,7 @@ export async function stop(port: number): Promise<void> {
 }
 
 export async function notify(options: NotifyOptions): Promise<NotifyResult> {
-  const baseUrl = `http://localhost:${options.port}`;
+  const baseUrl = `http://127.0.0.1:${options.port}`;
   const filePath = resolve(options.file);
 
   try {

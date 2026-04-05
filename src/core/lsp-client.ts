@@ -52,8 +52,11 @@ export class LSPClient {
       this.readyReject = reject;
     });
 
+    // Explicitly pass process.env — Bun compiled binaries do not always propagate
+    // the full environment to grandchild processes via child_process.spawn without it.
     this.process = spawn(this.options.omnisharpPath, args, {
       stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
     });
 
     if (!this.process.stdin || !this.process.stdout) {
