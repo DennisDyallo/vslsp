@@ -8,6 +8,7 @@
   "scripts": {
     "start": "bun run vslsp.ts",
     "test": "bun test",
+    "release": "bun run scripts/release.ts",
     "download-omnisharp": "bun run scripts/download-omnisharp.ts",
     "postinstall": "bun run scripts/download-omnisharp.ts"
   },
