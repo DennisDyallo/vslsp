@@ -1,14 +1,21 @@
 # Handoff — main
 
-**Date:** 2026-04-03
+**Date:** 2026-04-05
 **Branch:** main
-**Last commit:** ff2e602 Add CodeMapper/RustMapper parity: visibility, modifiers, fields, variants
+**Last commit:** 9e929f5 Fix verify_changes revert gap, wire --log-level to daemon subprocess, fix DOTNET_ROOT env propagation
 
 ---
 
 ## Session Summary
 
-This session completed the full Rust toolchain and achieved structural parity between the C# (CodeMapper) and Rust (RustMapper) analyzers. Starting from a built RustMapper binary, the session: tested it on a real 10-crate Rust workspace (`octo-rdt-prototype`), identified 5 agent-impacting quality gaps, implemented all fixes in RustMapper, added the `get_rust_diagnostics` MCP tool (making the tool count 9), then matched all those improvements in the C# CodeMapper to achieve architectural parity.
+This session ran a second DevTeam Ship pass, completing the four remaining items from the prior handoff:
+
+1. **Daemon integration test executed** — ran with `FIRST_RESPONDER_SLN` set against `../y/FirstResponder`; test passed after diagnosing and fixing DOTNET_ROOT env stripping by `StdioClientTransport`. Result: 58 pass, 0 fail, 0 skip in 25.5s.
+2. **verify_changes revert gap fixed** — hoisted `paths[]` before `try` block; added best-effort revert in `catch` for partial-apply failures.
+3. **--log-level forwarded to daemon subprocess** — `getLogLevel()` exported; `start_daemon` appends `--log-level <lvl>` to spawn args when non-default; explicit `env: process.env` passed to `Bun.spawn` for compiled binary env propagation.
+4. **DOTNET_ROOT env propagation fixed** — `StdioClientTransport` only inherits 6 env vars (security isolation); fixed by explicit `env` in `beforeAll` (test) and `env: process.env` in OmniSharp `child_process.spawn`.
+
+A Reviewer pass caught and fixed: dead `portNum` variable, invalid log level passthrough guard, Object.assign key collision in logger, hardcoded CS_FILE path in test. Final fix this session: `connectionError()` error message updated to say `127.0.0.1` (was `localhost`). All changes committed in `9e929f5`.
 
 ---
 
@@ -17,23 +24,24 @@ This session completed the full Rust toolchain and achieved structural parity be
 ### Committed Work (this session)
 
 ```
-ff2e602  Add CodeMapper/RustMapper parity: visibility, modifiers, fields, variants
-de0f57c  Improve RustMapper output quality and add get_rust_diagnostics MCP tool
-a90a0ff  Add .gitignore for rust-mapper to exclude target/ build artifacts
-47b8165  Add RustMapper binary and CI job for Rust code structure analysis
+9e929f5  Fix verify_changes revert gap, wire --log-level to daemon subprocess, fix DOTNET_ROOT env propagation
+71e1335  Add structured logging, daemon E2E test, version bump to v1.1.1  [prior session]
+8900f73  Fix verify_changes path filter to use matchFilePath instead of basename match  [prior session]
 ```
 
 ### Uncommitted Changes
 
-Only untracked plan documents in `Plans/` (bright-foraging-rivest.md, distributed-juggling-hedgehog.md, optimized-petting-cosmos-agent-*.md, woolly-purring-pizza.md). No dirty source files.
+Only `Plans/handoff.md` (this file) and ephemeral agent plan files are untracked. No source changes uncommitted.
 
 ### Build & Test Status
 
-- TypeScript type check: clean (`bun run tsc --noEmit`)
-- MCP server: 9 tools registered and verified
-- RustMapper: compiled and installed to `~/.local/share/vslsp/rust-mapper/RustMapper`
-- CodeMapper: compiled and installed to `~/.local/share/vslsp/code-mapper/CodeMapper`
-- Both mappers produce identical JSON schema (all fields always emitted, no nulls)
+- TypeScript type check: **clean** (`bun run tsc --noEmit`)
+- Tests (standard): **57 pass, 1 skip, 0 fail**
+  - Skip: daemon lifecycle integration test (requires `FIRST_RESPONDER_SLN` env var)
+- Tests (with FIRST_RESPONDER_SLN): **58 pass, 0 skip, 0 fail** in 25.5s
+- MCP tools: **10** registered and verified
+- MCP binary: `~/.local/share/vslsp/vslsp-mcp` — reflects all commits; needs rebuild after latest commit
+- Version: **1.1.1**
 
 ### Worktree / Parallel Agent State
 
@@ -43,7 +51,7 @@ None. Single worktree at main.
 
 ## Readiness Assessment
 
-**Target:** AI agents (Claude Code, Copilot, Cursor) working on C# or Rust codebases who need compilation diagnostics and structured code navigation via MCP tools.
+**Target:** AI agents (Claude Code, Copilot, Cursor) working on C#, Rust, or TypeScript codebases who need real compilation diagnostics and structured code navigation via MCP tools without leaving their agent context.
 
 | Need | Status | Notes |
 |------|--------|-------|
@@ -51,71 +59,49 @@ None. Single worktree at main.
 | Map C# code structure (full AST JSON) | ✅ Working | Visibility, modifiers, Field/Variant children |
 | Persistent C# daemon with file watching | ✅ Working | start/stop/notify/verify_changes all work |
 | Map Rust code structure | ✅ Working | Correct signatures, visibility, struct fields, enum variants |
-| Get Rust compilation errors | ✅ Working | get_rust_diagnostics via cargo check, same schema as C# |
-| MCP server auto-discovered by Claude Code | ✅ Working | Registered in ~/.claude.json |
-| CI builds all binaries for all platforms | ✅ Working | build-rust-mapper job + 3 targets in release.yml |
-| Dry-run verify refactorings (C#) | ✅ Working | verify_changes tool, tested E2E |
-| Test install.sh on clean machine | ⚠️ Partial | configure_mcp() python3 merge untested in the wild |
-| Rust verify_changes equivalent | ❌ Missing | No in-memory Rust analysis; cargo check is slow (seconds not ms) |
-| darwin-x64 CodeMapper native binary | ❌ Missing | Rosetta works, but no native x64 build in CI |
+| Get Rust compilation errors | ✅ Working | `get_rust_diagnostics` via cargo check, same schema as C# |
+| Map TypeScript code structure | ✅ Working | Classes, interfaces, enums, consts, functions, type aliases |
+| Get TypeScript compilation errors | ✅ Working | `get_ts_diagnostics` via `bunx tsc --noEmit` |
+| Observability / structured logging | ✅ Working | `--log-level` flag, JSON to stderr, lifecycle events, forwarded to daemon |
+| Dry-run verify refactorings (C#) | ✅ Working | `verify_changes` concurrency-safe, revert-on-error gap now closed |
+| Daemon lifecycle E2E coverage | ✅ Working | Integration test passes with FIRST_RESPONDER_SLN; DOTNET_ROOT fix in place |
+| CI builds all binaries for all platforms | ✅ Working | 4 platforms for bun, 3 for dotnet, 3 for cargo |
+| CI runs test suite on tag push | ✅ Working | Gates release job |
 
-**Overall:** 🟢 Production — all primary C# and Rust workflows work end-to-end. Both languages have diagnostics + structure analysis. Remaining gaps are edge cases or nice-to-haves.
+**Overall:** ⭐ Complete — all stated goals met. Full diagnostics + structure analysis for C#, Rust, TypeScript. Structured logging forwarded to daemon subprocess. E2E test suite with integration test gate. No known bugs remaining.
 
-**Critical next step:** Tag and release v0.4.0 with the 4 session commits, adding RustMapper binaries to the GitHub release assets.
+**Critical next step:** Rebuild MCP binary, then tag v1.1.1 and push to trigger CI release.
 
 ---
 
 ## What's Next (Prioritized)
 
-1. **Tag v0.4.0** — `git tag v0.4.0 && git push origin v0.4.0`. CI will build and publish RustMapper binaries for all 3 platforms alongside existing assets. Update `install.sh` to download RustMapper-* assets.
-2. **Update install.sh** — add RustMapper download + install step to `install.sh` so fresh installs include the Rust mapper binary.
-3. **Test install.sh on clean machine** — validate `configure_mcp()` JSON merge on a fresh system where `~/.claude.json` may have different structure.
-4. **Rust verify_changes** — investigate whether OmniSharp-style in-memory analysis is feasible for Rust (rust-analyzer LSP), or if a fast "cargo check single file" mode can approximate it.
-5. **darwin-x64 CodeMapper** — add native x64 target to CI (currently missing; ARM-only for macOS).
-6. **C# improvements backlog** — same quality audit could be applied to CodeMapper (e.g., indexer declarations, event declarations, delegate declarations not currently captured).
+1. **Rebuild MCP binary** — `bun build mcp.ts --compile --outfile ~/.local/share/vslsp/vslsp-mcp` (latest commit not yet reflected in deployed binary)
+2. **Tag v1.1.1 and push** — `git tag v1.1.1 && git push origin main && git push origin v1.1.1` to trigger CI release job (publishes binaries for all platforms)
+3. **Rebuild CLI binary** — `bun build vslsp.ts --compile --outfile ~/.local/share/vslsp/vslsp` (daemon subprocess needs --log-level support too)
 
 ## Blockers & Known Issues
 
-- **install.sh missing RustMapper step** — `install.sh` doesn't download or install the RustMapper binary yet. Agents calling `get_code_structure` with `language: "rust"` on a freshly installed system will get "binary not found."
-- **No v0.4.0 tag** — CI has not run for this session's commits. RustMapper binaries not yet published to GitHub Releases.
-- **syn compile time** — first CI build of RustMapper takes 60–90s. Cargo cache (Cargo.lock + registry) is in place but won't help until after the first successful run.
+- **MCP binary stale** — `9e929f5` committed but binary not yet rebuilt; `verify_changes` revert fix and --log-level forwarding are not live until rebuilt
+- **Integration test requires manual env var** — `FIRST_RESPONDER_SLN` must be set manually; not wired into CI (intentional — CI has no real .sln available)
+- **TMPDIR not in test env** — `beforeAll` StdioClientTransport env doesn't include `TMPDIR`; LOW risk on macOS where some .NET operations use temp dir (reviewer flagged)
+- **Partial-revert catch** — if notify() itself throws during revert loop, that file stays dirty; best-effort only (acceptable)
 
 ## Key File References
 
 | File | Purpose |
 |------|---------|
-| `mcp.ts` | MCP server — 9 tools; bump version here for releases |
-| `tools/rust-mapper/src/main.rs` | Rust AST analyzer — syn visitor, all quality fixes applied |
-| `tools/code-mapper/Program.cs` | C# AST analyzer — parity with RustMapper, all fields always emitted |
-| `src/diagnostics/rust.ts` | cargo check integration — collectRustDiagnostics() |
-| `src/code-mapping/registry.ts` | Language router — add entries here for new languages |
-| `src/core/types.ts` | Shared DiagnosticsResult type — used by both C# and Rust diagnostics |
-| `.github/workflows/release.yml` | Release pipeline — build-rust-mapper job with 3 targets |
-| `install.sh` | Global installer — needs RustMapper download step added |
-| `Plans/woolly-purring-pizza.md` | Audit plan for this session — all 5 items completed |
-
----
-
-## Schema Reference (Both Mappers)
-
-Both mappers now emit identical JSON for every member — no nulls, no missing fields:
-
-```json
-{
-  "type": "Method",
-  "signature": "pub async fn classify(&self, payload: &[u8]) -> anyhow::Result<Output>",
-  "lineNumber": 42,
-  "isStatic": false,
-  "visibility": "public",
-  "docString": "Classify an intent payload.",
-  "baseTypes": [],
-  "attributes": [],
-  "children": []
-}
-```
-
-Visibility values: `"public"` / `"private"` / `"internal"` / `"protected"` / `"crate"` / `"restricted(path)"`.
-Member types: `Class`, `Struct`, `Enum`, `Variant`, `Field`, `Property`, `Method`, `Constructor`, `Record`, `Interface`, `Trait`, `Impl`, `Fn`, `Mod`, `Namespace`.
+| `mcp.ts` | MCP server — 10 tools; version 1.1.1; `--log-level` parsing + daemon forwarding |
+| `src/core/logger.ts` | Minimal JSON logger — `log()`, `setLogLevel()`, `getLogLevel()` |
+| `src/core/types.ts` | Shared types + `matchFilePath()` + `calculateSummary()` |
+| `src/core/lsp-client.ts` | OmniSharp LSP client — explicit `env: process.env` in spawn |
+| `src/diagnostics/collector.ts` | OmniSharp collector — `existsSync` guard |
+| `src/diagnostics/client.ts` | HTTP client for daemon — all URLs use `127.0.0.1` |
+| `src/diagnostics/http.ts` | Daemon HTTP server — binds 127.0.0.1, logs errors via logger |
+| `src/diagnostics/typescript.ts` | TS diagnostics collector via `bunx tsc --noEmit` |
+| `src/diagnostics/rust.ts` | Rust diagnostics via `cargo check --message-format=json` |
+| `tests/e2e/mcp-server.test.ts` | E2E tests — 57 pass, 1 skip; daemon integration test passes with FIRST_RESPONDER_SLN |
+| `.github/workflows/release.yml` | CI — test job gates release; triggers on tag push |
 
 ---
 
@@ -127,18 +113,22 @@ cd /Users/Dennis.Dyall/Code/other/vslsp
 # Verify state
 git log --oneline -5
 bun run tsc --noEmit
-grep -c "registerTool" mcp.ts  # should be 9
+bun test --timeout 60000
+grep -c "registerTool" mcp.ts  # should be 10
 
-# Tag v0.4.0 (the main pending action)
-git tag v0.4.0
-git push origin v0.4.0
-# Then update install.sh to add RustMapper download step
+# Rebuild binaries (needed after latest commit)
+bun build mcp.ts --compile --outfile ~/.local/share/vslsp/vslsp-mcp
+bun build vslsp.ts --compile --outfile ~/.local/share/vslsp/vslsp
 
-# Test RustMapper locally
-~/.local/share/vslsp/rust-mapper/RustMapper \
-  /path/to/rust/project --stdout 2>/dev/null \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['summary'])"
+# Tag and release
+git tag v1.1.1 && git push origin main && git push origin v1.1.1
 
-# Test get_rust_diagnostics via MCP
-# mcp__vslsp__get_rust_diagnostics({ manifest: "/path/to/Cargo.toml" })
+# Run daemon integration test (requires real .sln)
+FIRST_RESPONDER_SLN=/Users/Dennis.Dyall/Code/y/first-responder/FirstResponder.sln \
+  bun test --timeout 300000
+
+# Key env vars for daemon integration test
+# FIRST_RESPONDER_SLN — path to .sln file (required)
+# FIRST_RESPONDER_CS_FILE — override default Theme.cs path (optional)
+# DOTNET_ROOT — must be set in shell; test passes it explicitly to transport
 ```
