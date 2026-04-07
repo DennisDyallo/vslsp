@@ -6,11 +6,14 @@ vslsp fixes that. It's an MCP server that gives agents full compilation diagnost
 
 ## Install
 
+> **C# users:** vslsp uses OmniSharp for C# diagnostics, which requires .NET 6.0+. Verify first: `dotnet --version`. ([Install .NET](https://dotnet.microsoft.com/download))
+> **Rust / TypeScript users:** No .NET required — you can skip C# entirely.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh | bash
 ```
 
-Installs the CLI, MCP server, OmniSharp (C#), and CSharpMapper (C#) by default. RustMapper and TSMapper are opt-in — you'll be prompted interactively, or pass `--mappers` to skip the prompt:
+Installs the CLI and MCP server. **OmniSharp (C#) and CSharpMapper are only downloaded if you select C#** — you won't pay for .NET if you don't need it. RustMapper and TSMapper are opt-in. You'll be prompted interactively, or pass `--mappers`:
 
 ```bash
 # Install with specific mappers
@@ -18,6 +21,9 @@ curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh 
 
 # Install all mappers non-interactively (CI)
 curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh | bash -s -- --mappers all --yes
+
+# TypeScript-only (no C# or Rust, non-interactive)
+curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh | bash -s -- --mappers typescript
 ```
 
 Add mappers later without reinstalling:
@@ -28,7 +34,11 @@ vslsp install-mapper typescript  # adds TSMapper
 vslsp install-mapper csharp      # re-installs CSharpMapper
 ```
 
-Registers itself with Claude Code automatically. For other MCP clients (Cursor, Windsurf, etc.), add this to your MCP config manually:
+After install, two things happen automatically if Claude Code is installed:
+- **MCP server** registered in `~/.claude.json` (all `mcp__vslsp__*` tools become available)
+- **`/vslsp` skill** installed to `~/.claude/commands/vslsp.md` (type `/vslsp` in Claude Code to load the workflow guide)
+
+For other MCP clients (Cursor, Windsurf, etc.), add this to your MCP config manually:
 
 ```json
 {
@@ -101,6 +111,17 @@ get_diagnostics(solution)          ← confirm everything is clean
 
 > **Important:** `verify_changes` requires the daemon to be running and `ready: true`. Always poll `get_daemon_status` before calling it. The daemon persists across calls — start it once per session.
 
+**Step-by-step checklist:**
+
+1. Call `start_daemon(solution)` with the absolute path to your `.sln` file
+2. Poll `get_daemon_status()` in a loop until `ready: true` — expect 15–90s on first run
+3. Call `verify_changes(changes)` to check proposed edits compile *without writing to disk*
+4. If `result.clean === true`: write your files to disk
+5. Call `notify_file_changed(file)` for each file you wrote
+6. Call `get_diagnostics(solution)` to confirm final state
+
+> The daemon persists across tool calls — start it once per session, not once per edit.
+
 ### Rust workflow
 
 ```
@@ -120,6 +141,10 @@ edit files on disk
          ↓
 get_ts_diagnostics(tsconfig.json)      ← run tsc --noEmit, get structured results
 ```
+
+Pass the path to `tsconfig.json` directly, or the directory containing it — vslsp will find it automatically. If your project has multiple tsconfig files (e.g. `tsconfig.build.json`), pass the specific one you want checked.
+
+> **Why no daemon for TypeScript?** `tsc --noEmit` is stateless and fast enough to run directly — no persistent process needed. This means TypeScript has no dry-run mode (no write-free pre-check), but the workflow is simpler: edit, then check.
 
 ## MCP Tools
 
@@ -153,6 +178,26 @@ get_ts_diagnostics(tsconfig.json)      ← run tsc --noEmit, get structured resu
 - TypeScript compiler accessible as `tsc` or via `bunx`/`npx` — verify with `tsc --version`
 - A `tsconfig.json` in your project (or pass its directory path to `get_ts_diagnostics`)
 - TSMapper installed: `vslsp install-mapper typescript`
+
+## Verify your install
+
+After installation, confirm everything is working:
+
+```bash
+# 1. CLI works
+vslsp --help
+
+# 2. MCP server registered (Claude Code)
+cat ~/.claude.json | python3 -c "import sys,json; d=json.load(sys.stdin); print('✓ MCP registered' if 'vslsp' in d.get('mcpServers',{}) else '✗ MCP not registered')"
+
+# 3. /vslsp skill installed (Claude Code)
+ls ~/.claude/commands/vslsp.md && echo "✓ Skill installed" || echo "✗ Skill not found (Claude Code may not be installed)"
+
+# 4. Check which mappers are installed
+ls ~/.local/share/vslsp/csharp-mapper/CSharpMapper 2>/dev/null && echo "✓ CSharpMapper" || echo "  CSharpMapper not installed"
+ls ~/.local/share/vslsp/rust-mapper/RustMapper     2>/dev/null && echo "✓ RustMapper"   || echo "  RustMapper not installed (run: vslsp install-mapper rust)"
+ls ~/.local/share/vslsp/ts-mapper/TSMapper         2>/dev/null && echo "✓ TSMapper"     || echo "  TSMapper not installed (run: vslsp install-mapper typescript)"
+```
 
 ## Troubleshooting
 

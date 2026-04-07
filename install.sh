@@ -51,15 +51,17 @@ detect_platform() {
     echo "${os}-${arch}"
 }
 
-# Check for .NET runtime
+# Check for .NET runtime. Pass "required" as first arg to fail hard if missing.
 check_dotnet() {
     if command -v dotnet &> /dev/null; then
         local version
         version=$(dotnet --version 2>/dev/null || echo "unknown")
         info ".NET runtime found: $version"
     else
-        warn ".NET runtime not found. OmniSharp requires .NET 6.0+"
-        warn "Install from: https://dotnet.microsoft.com/download"
+        if [[ "${1:-}" == "required" ]]; then
+            error ".NET 6.0+ is required to install C# support but was not found. Install from: https://dotnet.microsoft.com/download — then re-run the installer."
+        fi
+        warn ".NET runtime not found. Install from: https://dotnet.microsoft.com/download"
         echo ""
     fi
 }
@@ -210,18 +212,26 @@ download_ts_mapper() {
 select_mappers_interactive() {
     echo ""
     echo "Which code mappers would you like to install?"
-    echo "  C# (CSharpMapper) is always included."
+    echo "  [1] C# / Roslyn     (CSharpMapper + OmniSharp)  [default]"
     echo "  [2] Rust / syn      (RustMapper)"
     echo "  [3] TypeScript      (TSMapper)"
     echo ""
-    read -r -p "Enter additional mappers (e.g. 2 3), 'all', or ENTER for C# only: " selection
-    MAPPERS="csharp"
+    echo "  Tip: Rust and TypeScript work without C#. Use --mappers rust to skip C#."
+    echo ""
+    read -r -p "Enter numbers (e.g. 1 2 3), 'all', or ENTER for C# only [1]: " selection
+    MAPPERS=""
     if [[ "$selection" == "all" ]]; then
         MAPPERS="csharp,rust,typescript"
-    else
+    elif [[ -z "$selection" ]] || [[ "$selection" == *"1"* ]]; then
+        MAPPERS="csharp"
         [[ "$selection" == *"2"* ]] && MAPPERS="$MAPPERS,rust"
         [[ "$selection" == *"3"* ]] && MAPPERS="$MAPPERS,typescript"
+    else
+        [[ "$selection" == *"2"* ]] && MAPPERS="$MAPPERS,rust"
+        [[ "$selection" == *"3"* ]] && MAPPERS="${MAPPERS:+$MAPPERS,}typescript"
     fi
+    # Default to csharp if nothing selected
+    [[ -z "$MAPPERS" ]] && MAPPERS="csharp"
 }
 
 # Create symlink in ~/.local/bin
@@ -328,8 +338,6 @@ main() {
     platform="$(detect_platform)"
     info "Detected platform: $platform"
 
-    check_dotnet
-
     version="$(get_latest_version)"
     if [[ -z "$version" ]]; then
         error "Could not determine latest version"
@@ -338,7 +346,6 @@ main() {
 
     download_vslsp "$platform" "$version"
     download_vslsp_mcp "$platform" "$version"
-    download_omnisharp "$platform"
 
     # Resolve which mappers to install
     if [[ -z "$MAPPERS" ]]; then
@@ -351,7 +358,13 @@ main() {
     [[ "$MAPPERS" == "all" ]] && MAPPERS="csharp,rust,typescript"
     [[ "$MAPPERS" == "none" ]] && MAPPERS=""
 
-    [[ "$MAPPERS" == *"csharp"*      ]] && download_csharp_mapper "$platform" "$version"
+    # Check .NET only when C# is selected — fail hard if missing
+    [[ "$MAPPERS" == *"csharp"* ]] && check_dotnet "required"
+
+    if [[ "$MAPPERS" == *"csharp"* ]]; then
+        download_omnisharp "$platform"
+        download_csharp_mapper "$platform" "$version"
+    fi
     [[ "$MAPPERS" == *"rust"*        ]] && download_rust_mapper "$platform" "$version"
     [[ "$MAPPERS" == *"typescript"*  ]] && download_ts_mapper "$platform" "$version"
 
@@ -366,6 +379,14 @@ main() {
     echo "================================"
     echo ""
     echo "Run 'vslsp --help' to get started."
+    echo ""
+    if [[ -n "$MAPPERS" ]]; then
+        echo "Installed mappers: $MAPPERS"
+    fi
+    echo "Add more mappers anytime:"
+    echo "  vslsp install-mapper rust"
+    echo "  vslsp install-mapper typescript"
+    echo "  vslsp install-mapper csharp"
     echo ""
 }
 
