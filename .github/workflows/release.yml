@@ -41,7 +41,11 @@ jobs:
         run: bun install
 
       - name: Build vslsp binary
-        run: bun build --compile --minify --target=${{ matrix.target }} vslsp.ts --outfile vslsp-${{ matrix.suffix }}
+        run: |
+          VERSION=$(jq -r .version package.json)
+          bun build --compile --minify --target=${{ matrix.target }} vslsp.ts \
+            --outfile vslsp-${{ matrix.suffix }} \
+            --define "VSLSP_VERSION=\"$VERSION\""
 
       - name: Build vslsp-mcp binary
         run: bun build --compile --minify --target=${{ matrix.target }} mcp.ts --outfile vslsp-mcp-${{ matrix.suffix }}
@@ -58,7 +62,7 @@ jobs:
           name: vslsp-mcp-${{ matrix.suffix }}
           path: vslsp-mcp-${{ matrix.suffix }}
 
-  build-codemapper:
+  build-csharpmapper:
     strategy:
       matrix:
         include:
@@ -71,6 +75,9 @@ jobs:
           - os: macos-latest
             rid: osx-arm64
             suffix: darwin-arm64
+          - os: macos-13
+            rid: osx-x64
+            suffix: darwin-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -83,22 +90,22 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      - name: Build CodeMapper
+      - name: Build CSharpMapper
         run: |
-          dotnet publish tools/code-mapper/CodeMapper.csproj \
+          dotnet publish tools/csharp-mapper/CSharpMapper.csproj \
             -c Release \
             -r ${{ matrix.rid }} \
             -p:PublishSingleFile=true \
             -p:PublishTrimmed=true \
             --self-contained true \
             -o publish
-          mv publish/CodeMapper CodeMapper-${{ matrix.suffix }}
+          mv publish/CSharpMapper CSharpMapper-${{ matrix.suffix }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: CodeMapper-${{ matrix.suffix }}
-          path: CodeMapper-${{ matrix.suffix }}
+          name: CSharpMapper-${{ matrix.suffix }}
+          path: CSharpMapper-${{ matrix.suffix }}
 
   build-rust-mapper:
     strategy:
@@ -113,6 +120,9 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             suffix: darwin-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            suffix: darwin-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -215,7 +225,7 @@ jobs:
         run: bun test --timeout 60000
 
   release:
-    needs: [build-bun, build-codemapper, build-rust-mapper, build-ts-mapper, test]
+    needs: [build-bun, build-csharpmapper, build-rust-mapper, build-ts-mapper, test]
     runs-on: ubuntu-24.04
 
     steps:

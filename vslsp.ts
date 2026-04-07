@@ -3,9 +3,14 @@ import { DiagnosticsCollector } from "./src/diagnostics/collector";
 import { serve } from "./src/diagnostics/daemon";
 import { query, status, notify } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
-import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CODE_MAPPER } from "./src/core/defaults";
-// DEFAULT_CODE_MAPPER kept for parseArgs legacy --code-mapper flag
+import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CSHARP_MAPPER } from "./src/core/defaults";
+import { getMapper } from "./src/code-mapping/registry";
 import { existsSync } from "fs";
+import { mkdirSync } from "fs";
+import { join } from "path";
+
+// Embedded at build time via --define "VSLSP_VERSION=\"x.y.z\""
+declare const VSLSP_VERSION: string;
 import { resolve } from "path";
 
 const HELP = `
@@ -24,12 +29,16 @@ USAGE:
   # Code structure mapping
   vslsp map [path] [--format text|json|yaml] [--output dir]
 
+  # Install a code mapper
+  vslsp install-mapper <lang>
+
 COMMANDS:
   serve                 Start persistent daemon with HTTP API
   query                 Query diagnostics from running daemon
   status                Get daemon status
   notify                Notify daemon of file change
-  map                   Map code structure (C#, Rust) via AST analysis
+  map                   Map code structure (C#, Rust, TypeScript) via AST analysis
+  install-mapper        Install a code mapper (csharp | rust | typescript)
 
 OPTIONS (one-shot mode):
   --solution <path>     Path to .sln file (required)
@@ -47,7 +56,7 @@ OPTIONS (map mode):
   --format <type>       Output: text | json | yaml (default: json)
   --output <dir>        Output directory (default: codebase_ast)
   --language <lang>     Language: csharp | rust (auto-detected from extensions)
-  --code-mapper <path>  CodeMapper binary path (legacy)
+  --code-mapper <path>  CSharpMapper binary path (legacy)
 
 EXAMPLES:
   # One-shot (existing behavior)
@@ -70,10 +79,11 @@ EXAMPLES:
   vslsp map . --format json --output ./docs
 `;
 
-type Command = "serve" | "query" | "status" | "notify" | "map" | "oneshot";
+type Command = "serve" | "query" | "status" | "notify" | "map" | "install-mapper" | "oneshot";
 
 interface CLIArgs {
   command: Command;
+  installLang: string;
   solution: string;
   timeout: number;
   quietPeriod: number;
@@ -92,12 +102,13 @@ function parseArgs(): CLIArgs {
   const args = process.argv.slice(2);
   const result: CLIArgs = {
     command: "oneshot",
+    installLang: "",
     solution: "",
     timeout: 60000,
     quietPeriod: 5000,
     format: "compact",
     omnisharpPath: DEFAULT_OMNISHARP,
-    codeMapperPath: DEFAULT_CODE_MAPPER,
+    codeMapperPath: DEFAULT_CSHARP_MAPPER,
     language: "",
     port: DEFAULT_PORT,
     file: "",
@@ -112,6 +123,10 @@ function parseArgs(): CLIArgs {
     if (firstArg === "serve" || firstArg === "query" || firstArg === "status" || firstArg === "notify" || firstArg === "map") {
       result.command = firstArg;
       args.shift();
+    } else if (firstArg === "install-mapper") {
+      result.command = "install-mapper";
+      args.shift();
+      result.installLang = args[0] && !args[0].startsWith("-") ? args.shift()! : "";
     }
   }
 
@@ -156,7 +171,7 @@ function parseArgs(): CLIArgs {
         i++;
         break;
       case "--code-mapper":
-        result.codeMapperPath = nextArg || DEFAULT_CODE_MAPPER;
+        result.codeMapperPath = nextArg || DEFAULT_CSHARP_MAPPER;
         i++;
         break;
       case "--language":
@@ -186,6 +201,43 @@ function error(message: string): never {
   console.error(`Error: ${message}`);
   console.error("Use --help for usage information.");
   process.exit(1);
+}
+
+async function installMapper(language: string): Promise<void> {
+  const m = getMapper(language);
+  if (!m) {
+    console.error(`Unknown language: ${language}\nSupported: csharp, rust, typescript`);
+    process.exit(1);
+  }
+
+  const osPart = Bun.spawnSync(["uname", "-s"]).stdout.toString().trim().toLowerCase() === "darwin"
+    ? "darwin" : "linux";
+  const rawArch = Bun.spawnSync(["uname", "-m"]).stdout.toString().trim();
+  const archPart = (rawArch === "x86_64" || rawArch === "amd64") ? "x64" : "arm64";
+  const platform = `${osPart}-${archPart}`;
+
+  const version = typeof VSLSP_VERSION !== "undefined" ? VSLSP_VERSION : "latest";
+  const assetName = `${m.binaryName}-${platform}`;
+  const url = version === "latest"
+    ? `https://github.com/DennisDyallo/vslsp/releases/latest/download/${assetName}`
+    : `https://github.com/DennisDyallo/vslsp/releases/download/${version}/${assetName}`;
+  const installDir = join(process.env.HOME || "~", ".local", "share", "vslsp", m.installDir);
+
+  console.log(`Downloading ${assetName} (${version})...`);
+  mkdirSync(installDir, { recursive: true });
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`Download failed (${res.status}): ${url}`);
+    process.exit(1);
+  }
+  await Bun.write(m.binaryPath, res);
+
+  Bun.spawnSync(["chmod", "+x", m.binaryPath]);
+  if (osPart === "darwin") {
+    Bun.spawnSync(["xattr", "-dr", "com.apple.quarantine", m.binaryPath]);
+  }
+  console.log(`Installed: ${m.binaryPath}`);
 }
 
 async function runOneShot(args: CLIArgs): Promise<void> {
@@ -278,6 +330,14 @@ async function main() {
         file: args.file,
       });
       console.log(`Notified: ${notifyResult.action} for ${notifyResult.path}`);
+      break;
+    }
+
+    case "install-mapper": {
+      if (!args.installLang) {
+        error("Usage: vslsp install-mapper <lang>  (csharp | rust | typescript)");
+      }
+      await installMapper(args.installLang);
       break;
     }
 

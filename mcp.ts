@@ -113,8 +113,9 @@ server.registerTool(
   {
     title: "Get C# Diagnostics Summary",
     description:
-      "Get a quick summary of C# compilation diagnostic counts (errors, warnings, info, hints). " +
-      "Faster than get_diagnostics when you only need counts.",
+      "Get a quick count of C# compilation diagnostics (errors, warnings, info, hints). " +
+      "Call this first to check whether there are any errors before deciding to pull full detail with get_diagnostics. " +
+      "If summary.errors === 0 you can skip get_diagnostics entirely.",
     inputSchema: {
       solution: z.string().describe("Absolute path to .sln file"),
       use_daemon: z.boolean().optional().default(false).describe("Query running daemon instead of one-shot analysis"),
@@ -168,7 +169,7 @@ server.registerTool(
       "Use this to understand a codebase without reading every file. " +
       "Pair with verify_changes to validate proposed edits compile before writing to disk.",
     inputSchema: {
-      path: z.string().describe("Path to directory or file to analyze"),
+      path: z.string().describe("Absolute path to directory or file to analyze"),
       format: z.enum(["text", "json", "yaml"]).optional().default("json").describe("Output format"),
       language: z.enum(["csharp", "rust", "typescript"]).optional().describe("Language to analyze. Auto-detected from file extensions if omitted."),
     },
@@ -199,10 +200,11 @@ server.registerTool(
   {
     title: "Start Diagnostics Daemon",
     description:
-      "Start a persistent vslsp diagnostics daemon for a .NET solution. " +
-      "The daemon watches for file changes and keeps diagnostics up-to-date. " +
-      "Use get_diagnostics with use_daemon=true to query it after starting. " +
-      "After starting, poll get_daemon_status until ready=true.",
+      "Start a persistent OmniSharp daemon for a .NET solution. " +
+      "Required before calling verify_changes — the daemon enables dry-run compilation without writing to disk. " +
+      "Also speeds up repeated get_diagnostics calls (use use_daemon=true). " +
+      "After calling this, poll get_daemon_status until ready=true before using verify_changes. " +
+      "First startup takes 15–90s depending on solution size. Daemon persists across tool calls.",
     inputSchema: {
       solution: z.string().describe("Absolute path to .sln file"),
       port: z.number().optional().default(DEFAULT_PORT).describe("HTTP port for daemon"),
@@ -260,7 +262,10 @@ server.registerTool(
   "get_daemon_status",
   {
     title: "Get Daemon Status",
-    description: "Check if a vslsp diagnostics daemon is running and get its status.",
+    description:
+      "Check daemon status. Poll this after start_daemon until ready=true before calling verify_changes. " +
+      "ready=true means OmniSharp has fully loaded the solution and diagnostics are live. " +
+      "updateCount increments each time OmniSharp processes a file change — use it to detect when analysis has settled.",
     inputSchema: {
       port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port to check"),
     },
@@ -324,7 +329,7 @@ server.registerTool(
       "If content is provided, updates in-memory only (no disk read). " +
       "If omitted, daemon reads the file from disk.",
     inputSchema: {
-      file: z.string().describe("Absolute path to the .cs file"),
+      file: z.string().describe("Absolute path to the changed source file"),
       content: z.string().optional().describe("New file content for in-memory update. Omit to read from disk."),
       port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port"),
     },

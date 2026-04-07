@@ -40,10 +40,10 @@ omnisharp/
 vslsp-bin
 vslsp-mcp
 
-# CodeMapper build artifacts
-tools/code-mapper/bin/
-tools/code-mapper/obj/
-tools/code-mapper/publish/
+# CSharpMapper build artifacts
+tools/csharp-mapper/bin/
+tools/csharp-mapper/obj/
+tools/csharp-mapper/publish/
 
-# CodeMapper output
+# CSharpMapper output
 codebase_ast/

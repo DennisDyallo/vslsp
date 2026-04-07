@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 use walkdir::WalkDir;
 
-// ── Output schema (matches CodeMapper OutputRoot) ────────────────────────────
+// ── Output schema (matches CSharpMapper OutputRoot) ──────────────────────────
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -816,7 +816,9 @@ fn main() {
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("rust-mapper [path] [--format text|json|yaml] [--stdout] [--output <dir>]");
-        eprintln!("  Analyze Rust source files and output structure as JSON (CodeMapper schema).");
+        eprintln!(
+            "  Analyze Rust source files and output structure as JSON (CSharpMapper schema)."
+        );
         std::process::exit(0);
     }
 

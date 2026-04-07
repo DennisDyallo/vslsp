@@ -8,6 +8,18 @@ OMNISHARP_VERSION="v1.39.11"
 INSTALL_DIR="$HOME/.local/share/vslsp"
 BIN_DIR="$HOME/.local/bin"
 
+# Parse installer flags
+MAPPERS=""
+YES=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mappers=*) MAPPERS="${1#--mappers=}"; shift ;;
+    --mappers)   [[ $# -ge 2 ]] || error "--mappers requires a value"; MAPPERS="$2"; shift 2 ;;
+    --yes|-y)    YES=true; shift ;;
+    *)           shift ;;
+  esac
+done
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -145,56 +157,70 @@ download_omnisharp() {
     info "OmniSharp installed to $omnisharp_dir/OmniSharp"
 }
 
-# Download CodeMapper
-download_code_mapper() {
+# Download CSharpMapper
+download_csharp_mapper() {
     local platform="$1" version="$2"
-    local binary_name="CodeMapper-${platform}"
+    local binary_name="CSharpMapper-${platform}"
     local url="https://github.com/${REPO}/releases/download/${version}/${binary_name}"
-    local code_mapper_dir="$INSTALL_DIR/code-mapper"
+    local csharp_mapper_dir="$INSTALL_DIR/csharp-mapper"
 
-    info "Downloading CodeMapper for ${platform}..."
-    mkdir -p "$code_mapper_dir"
-    download "$url" "$code_mapper_dir/CodeMapper"
-    chmod +x "$code_mapper_dir/CodeMapper"
+    info "Downloading CSharpMapper for ${platform}..."
+    mkdir -p "$csharp_mapper_dir"
+    download "$url" "$csharp_mapper_dir/CSharpMapper"
+    chmod +x "$csharp_mapper_dir/CSharpMapper"
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        xattr -dr com.apple.quarantine "$code_mapper_dir/CodeMapper" 2>/dev/null || true
+        xattr -dr com.apple.quarantine "$csharp_mapper_dir/CSharpMapper" 2>/dev/null || true
     fi
-    info "CodeMapper installed to $code_mapper_dir/CodeMapper"
+    info "CSharpMapper installed to $csharp_mapper_dir/CSharpMapper"
 }
 
-# Download RustMapper (optional — skips gracefully if not in release)
+# Download RustMapper
 download_rust_mapper() {
     local platform="$1" version="$2"
     local url="https://github.com/${REPO}/releases/download/${version}/RustMapper-${platform}"
     local rust_mapper_dir="$INSTALL_DIR/rust-mapper"
 
-    if curl --head --silent --fail "$url" > /dev/null 2>&1; then
-        info "Downloading RustMapper for ${platform}..."
-        mkdir -p "$rust_mapper_dir"
-        download "$url" "$rust_mapper_dir/RustMapper"
-        chmod +x "$rust_mapper_dir/RustMapper"
-        if [[ "$(uname -s)" == "Darwin" ]]; then
-            xattr -dr com.apple.quarantine "$rust_mapper_dir/RustMapper" 2>/dev/null || true
-        fi
-        info "RustMapper installed to $rust_mapper_dir/RustMapper"
+    info "Downloading RustMapper for ${platform}..."
+    mkdir -p "$rust_mapper_dir"
+    download "$url" "$rust_mapper_dir/RustMapper"
+    chmod +x "$rust_mapper_dir/RustMapper"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        xattr -dr com.apple.quarantine "$rust_mapper_dir/RustMapper" 2>/dev/null || true
     fi
+    info "RustMapper installed to $rust_mapper_dir/RustMapper"
 }
 
-# Download TSMapper (optional — skips gracefully if not in release)
+# Download TSMapper
 download_ts_mapper() {
     local platform="$1" version="$2"
     local url="https://github.com/${REPO}/releases/download/${version}/TSMapper-${platform}"
     local ts_mapper_dir="$INSTALL_DIR/ts-mapper"
 
-    if curl --head --silent --fail "$url" > /dev/null 2>&1; then
-        info "Downloading TSMapper for ${platform}..."
-        mkdir -p "$ts_mapper_dir"
-        download "$url" "$ts_mapper_dir/TSMapper"
-        chmod +x "$ts_mapper_dir/TSMapper"
-        if [[ "$(uname -s)" == "Darwin" ]]; then
-            xattr -dr com.apple.quarantine "$ts_mapper_dir/TSMapper" 2>/dev/null || true
-        fi
-        info "TSMapper installed to $ts_mapper_dir/TSMapper"
+    info "Downloading TSMapper for ${platform}..."
+    mkdir -p "$ts_mapper_dir"
+    download "$url" "$ts_mapper_dir/TSMapper"
+    chmod +x "$ts_mapper_dir/TSMapper"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        xattr -dr com.apple.quarantine "$ts_mapper_dir/TSMapper" 2>/dev/null || true
+    fi
+    info "TSMapper installed to $ts_mapper_dir/TSMapper"
+}
+
+# Interactively select mappers (called when MAPPERS is unset and stdin is a TTY)
+select_mappers_interactive() {
+    echo ""
+    echo "Which code mappers would you like to install?"
+    echo "  C# (CSharpMapper) is always included."
+    echo "  [2] Rust / syn      (RustMapper)"
+    echo "  [3] TypeScript      (TSMapper)"
+    echo ""
+    read -r -p "Enter additional mappers (e.g. 2 3), 'all', or ENTER for C# only: " selection
+    MAPPERS="csharp"
+    if [[ "$selection" == "all" ]]; then
+        MAPPERS="csharp,rust,typescript"
+    else
+        [[ "$selection" == *"2"* ]] && MAPPERS="$MAPPERS,rust"
+        [[ "$selection" == *"3"* ]] && MAPPERS="$MAPPERS,typescript"
     fi
 }
 
@@ -261,6 +287,26 @@ PYEOF
     fi
 }
 
+# Install vslsp as a Claude Code custom slash command (/vslsp)
+# Works in any Claude Code instance — no additional framework required.
+install_skill() {
+    local skill_url="https://raw.githubusercontent.com/${REPO}/main/skills/vslsp/SKILL.md"
+    local commands_dir="$HOME/.claude/commands"
+    local skill_dst="$commands_dir/vslsp.md"
+
+    if [[ ! -d "$HOME/.claude" ]]; then
+        # Claude Code not installed — skip silently
+        return
+    fi
+
+    mkdir -p "$commands_dir"
+    if download "$skill_url" "$skill_dst" 2>/dev/null; then
+        info "Claude Code /vslsp command installed to $skill_dst"
+    else
+        warn "Could not download Claude Code /vslsp command — skipping"
+    fi
+}
+
 # Verify installation
 verify_install() {
     info "Verifying installation..."
@@ -293,11 +339,25 @@ main() {
     download_vslsp "$platform" "$version"
     download_vslsp_mcp "$platform" "$version"
     download_omnisharp "$platform"
-    download_code_mapper "$platform" "$version"
-    download_rust_mapper "$platform" "$version"
-    download_ts_mapper "$platform" "$version"
+
+    # Resolve which mappers to install
+    if [[ -z "$MAPPERS" ]]; then
+        if [[ "$YES" == "true" ]] || ! [ -t 0 ]; then
+            MAPPERS="csharp"
+        else
+            select_mappers_interactive
+        fi
+    fi
+    [[ "$MAPPERS" == "all" ]] && MAPPERS="csharp,rust,typescript"
+    [[ "$MAPPERS" == "none" ]] && MAPPERS=""
+
+    [[ "$MAPPERS" == *"csharp"*      ]] && download_csharp_mapper "$platform" "$version"
+    [[ "$MAPPERS" == *"rust"*        ]] && download_rust_mapper "$platform" "$version"
+    [[ "$MAPPERS" == *"typescript"*  ]] && download_ts_mapper "$platform" "$version"
+
     create_symlink
     configure_mcp
+    install_skill
     verify_install
 
     echo ""

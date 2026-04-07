@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { existsSync } from "fs";
-import { DEFAULT_CODE_MAPPER } from "../core/defaults";
+import { DEFAULT_CSHARP_MAPPER } from "../core/defaults";
 import { detectLanguage, getMapper } from "./registry";
 
 export interface MapOptions {
@@ -21,20 +21,23 @@ export async function map(options: MapOptions): Promise<MapResult> {
   let binaryPath: string;
   if (options.language) {
     const m = getMapper(options.language);
-    binaryPath = m?.binaryPath ?? options.codeMapperPath ?? DEFAULT_CODE_MAPPER;
+    binaryPath = m?.binaryPath ?? options.codeMapperPath ?? DEFAULT_CSHARP_MAPPER;
   } else if (options.codeMapperPath) {
     binaryPath = options.codeMapperPath;
   } else {
     const detected = detectLanguage(options.path);
-    binaryPath = detected?.binaryPath ?? DEFAULT_CODE_MAPPER;
+    binaryPath = detected?.binaryPath ?? DEFAULT_CSHARP_MAPPER;
   }
 
   binaryPath = resolve(binaryPath);
 
   if (!existsSync(binaryPath)) {
+    const langLabel = options.language
+      ?? detectLanguage(options.path)?.language
+      ?? "csharp";
     throw new Error(
       `Mapper binary not found at: ${binaryPath}\n` +
-      "Run 'vslsp build-tools' or install the appropriate mapper."
+      `Install it with: vslsp install-mapper ${langLabel}`
     );
   }
 

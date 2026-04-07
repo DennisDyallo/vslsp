@@ -144,7 +144,9 @@ console.log("  ✓ vslsp-mcp deployed");
 
 runPassthrough(
   "bun",
-  ["build", "vslsp.ts", "--compile", "--outfile", join(INSTALL_DIR, "vslsp")],
+  ["build", "vslsp.ts", "--compile",
+   "--define", `VSLSP_VERSION="${version}"`,
+   "--outfile", join(INSTALL_DIR, "vslsp")],
   { failMessage: "Failed to build vslsp" }
 );
 console.log("  ✓ vslsp deployed");

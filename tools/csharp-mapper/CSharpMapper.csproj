@@ -12,7 +12,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     
     <!-- Exclude test folder from compilation -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);CodeMapper.Tests\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);CSharpMapper.Tests\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

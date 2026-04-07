@@ -2,7 +2,7 @@ import ts from "typescript";
 import { statSync, readFileSync, readdirSync } from "fs";
 import { join, resolve, relative, extname, dirname, basename } from "path";
 
-// ── Output schema (matches CodeMapper/RustMapper) ────────────────────────────
+// ── Output schema (matches CSharpMapper/RustMapper) ──────────────────────────
 
 interface CodeMember {
   type: string;
@@ -32,7 +32,7 @@ const args = process.argv.slice(2);
 
 if (args.includes("--help") || args.includes("-h")) {
   console.error("ts-mapper [path] [--format text|json|yaml] [--stdout] [--output <dir>]");
-  console.error("  Analyze TypeScript source files and output structure (CodeMapper schema).");
+  console.error("  Analyze TypeScript source files and output structure (CSharpMapper schema).");
   process.exit(0);
 }
 

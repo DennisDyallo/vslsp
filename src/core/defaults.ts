@@ -11,13 +11,13 @@ export const DEFAULT_OMNISHARP = join(
   "OmniSharp"
 );
 
-export const DEFAULT_CODE_MAPPER = join(
+export const DEFAULT_CSHARP_MAPPER = join(
   process.env.HOME || "~",
   ".local",
   "share",
   "vslsp",
-  "code-mapper",
-  "CodeMapper"
+  "csharp-mapper",
+  "CSharpMapper"
 );
 
 export const DEFAULT_VSLSP = join(

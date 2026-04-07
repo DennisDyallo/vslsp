@@ -36,5 +36,5 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      - name: Build CodeMapper
-        run: dotnet publish tools/code-mapper/CodeMapper.csproj -c Release -o tools/code-mapper/publish
+      - name: Build CSharpMapper
+        run: dotnet publish tools/csharp-mapper/CSharpMapper.csproj -c Release -o tools/csharp-mapper/publish
