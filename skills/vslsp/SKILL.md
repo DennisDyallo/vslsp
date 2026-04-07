@@ -133,6 +133,7 @@ This downloads only that binary for the current platform — nothing else is tou
 - All paths must be **absolute** — relative paths are not supported
 - `verify_changes` requires the daemon to be running and `ready: true` — always poll `get_daemon_status` first
 - The daemon persists across tool calls — start it once per session, not once per verify call
+- The daemon binds to port **7850** by default. Pass `port: 7851` (or any free port) to every daemon tool call in the session if that port is in use
 - `notify_file_changed` with `content` = in-memory update (no disk read); without `content` = reads from disk
 - `get_diagnostics_summary` is faster than `get_diagnostics` — use it first to check if errors exist before pulling detail
 

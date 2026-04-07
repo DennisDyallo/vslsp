@@ -132,6 +132,8 @@ edit files on disk
 get_rust_diagnostics(Cargo.toml)      ← run cargo check, get structured results
 ```
 
+> **First-time Rust setup:** Run `vslsp install-mapper rust` before first use. Without it, `get_code_structure` will report "binary not found".
+
 ### TypeScript workflow
 
 ```
@@ -217,7 +219,33 @@ Restart your shell (and your MCP client) after setting it.
 
 **Daemon never becomes ready / get_daemon_status returns ready: false indefinitely**
 
-OmniSharp loads the full solution — on first run against a large solution this can take 60–90 seconds. Poll with a reasonable timeout. If it never becomes ready, check that the `.sln` path is correct and that `dotnet` is accessible.
+OmniSharp loads the full solution — on first run against a large solution this can take 60–90 seconds. Poll with a reasonable timeout. If it still doesn't become ready, work through these steps in order:
+
+1. **Verify the `.sln` path is absolute and correct** — `ls /absolute/path/to/Your.sln` must return the file
+2. **Confirm `dotnet` is in PATH** — `dotnet --version` must print a version ≥ 6.0
+3. **Check if port 7850 is in use** — `lsof -i :7850`; if occupied, pass a different port: `start_daemon({ solution: "...", port: 7851 })`
+4. **Check OmniSharp output** — run `vslsp serve --solution /abs/path/to/Your.sln` in a terminal; OmniSharp startup errors appear on stderr and will be visible directly
+5. **Set `DOTNET_ROOT`** if dotnet is installed but OmniSharp can't find it: `export DOTNET_ROOT=$(dirname $(dirname $(which dotnet)))`, then restart your MCP client
+
+**Custom daemon port / port 7850 already in use**
+
+The daemon binds to port `7850` by default. All daemon tools accept an optional `port` parameter — pass the same value to every call in a session:
+
+```bash
+# Check what's using 7850
+lsof -i :7850
+```
+
+Then use a free port across all daemon calls:
+
+```
+start_daemon({ solution: "...", port: 7851 })
+get_daemon_status({ port: 7851 })
+verify_changes({ changes: [...], port: 7851 })
+notify_file_changed({ file: "...", port: 7851 })
+get_diagnostics({ solution: "...", use_daemon: true, port: 7851 })
+stop_daemon({ port: 7851 })
+```
 
 **get_code_structure / get_rust_diagnostics: "binary not found"**
 
