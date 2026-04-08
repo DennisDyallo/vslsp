@@ -80,4 +80,21 @@ describe("mapper — real code structure analysis", () => {
     const parsed = JSON.parse(result.output);
     expect(parsed.files.length).toBeGreaterThan(0);
   }, 15_000);
+
+  test("auto-detects TypeScript from a directory containing .ts files", async () => {
+    if (!existsSync(DEFAULT_TS_MAPPER)) {
+      console.warn("TSMapper binary not installed, skipping");
+      return;
+    }
+
+    // src/core/ contains .ts files — language should be detected from directory scan
+    const result = await map({
+      path: "src/core",
+      format: "json",
+    });
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.output);
+    expect(parsed.files.length).toBeGreaterThan(0);
+  }, 15_000);
 });

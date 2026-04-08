@@ -1,3 +1,4 @@
+import { statSync, readdirSync } from "fs";
 import { DEFAULT_CSHARP_MAPPER, DEFAULT_RUST_MAPPER, DEFAULT_TS_MAPPER } from "../core/defaults";
 
 export interface LanguageMapper {
@@ -18,9 +19,26 @@ export const LANGUAGE_REGISTRY: LanguageMapper[] = [
 ];
 
 export function detectLanguage(targetPath: string): LanguageMapper | null {
+  // Fast path: single file — check extension directly
   for (const mapper of LANGUAGE_REGISTRY) {
     if (mapper.extensions.some(ext => targetPath.endsWith(ext))) return mapper;
   }
+
+  // Directory path: scan top-level contents for files with matching extensions
+  try {
+    if (statSync(targetPath).isDirectory()) {
+      const entries = readdirSync(targetPath, { withFileTypes: true });
+      for (const mapper of LANGUAGE_REGISTRY) {
+        const hasMatch = entries.some(
+          entry => entry.isFile() && mapper.extensions.some(ext => entry.name.endsWith(ext))
+        );
+        if (hasMatch) return mapper;
+      }
+    }
+  } catch {
+    // Path doesn't exist or can't be read — fall through to null
+  }
+
   return null;
 }
 
