@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { map } from "../../src/code-mapping/mapper";
 import { existsSync } from "fs";
-import { DEFAULT_TS_MAPPER } from "../../src/core/defaults";
+import { DEFAULT_TS_MAPPER, DEFAULT_RUST_MAPPER } from "../../src/core/defaults";
 
 describe("mapper — real code structure analysis", () => {
   test("maps a real TypeScript file and extracts interfaces, functions, types", async () => {
@@ -73,6 +73,23 @@ describe("mapper — real code structure analysis", () => {
     // Don't pass language — should auto-detect .ts as typescript
     const result = await map({
       path: "src/core/types.ts",
+      format: "json",
+    });
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.output);
+    expect(parsed.files.length).toBeGreaterThan(0);
+  }, 15_000);
+
+  test("auto-detects Rust from a directory with Cargo.toml but no top-level .rs files", async () => {
+    if (!existsSync(DEFAULT_RUST_MAPPER)) {
+      console.warn("RustMapper binary not installed, skipping");
+      return;
+    }
+
+    // tools/rust-mapper/ has Cargo.toml at root but .rs files are in src/ — tests manifest detection
+    const result = await map({
+      path: "tools/rust-mapper",
       format: "json",
     });
 

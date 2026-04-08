@@ -24,15 +24,22 @@ export function detectLanguage(targetPath: string): LanguageMapper | null {
     if (mapper.extensions.some(ext => targetPath.endsWith(ext))) return mapper;
   }
 
-  // Directory path: scan top-level contents for files with matching extensions
+  // Directory path: check project manifests then top-level source files
   try {
     if (statSync(targetPath).isDirectory()) {
       const entries = readdirSync(targetPath, { withFileTypes: true });
+      const fileNames = entries.filter(e => e.isFile()).map(e => e.name);
+
+      // Project manifest detection — reliable anchor even when source files are in subdirs
+      if (fileNames.includes("tsconfig.json")) return getMapper("typescript") ?? null;
+      if (fileNames.includes("Cargo.toml"))    return getMapper("rust") ?? null;
+      if (fileNames.some(n => n.endsWith(".csproj") || n.endsWith(".sln"))) {
+        return getMapper("csharp") ?? null;
+      }
+
+      // Fallback: source file extension scan at top level
       for (const mapper of LANGUAGE_REGISTRY) {
-        const hasMatch = entries.some(
-          entry => entry.isFile() && mapper.extensions.some(ext => entry.name.endsWith(ext))
-        );
-        if (hasMatch) return mapper;
+        if (fileNames.some(n => mapper.extensions.some(ext => n.endsWith(ext)))) return mapper;
       }
     }
   } catch {

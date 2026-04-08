@@ -347,6 +347,15 @@ main() {
     download_vslsp "$platform" "$version"
     download_vslsp_mcp "$platform" "$version"
 
+    # Migrate legacy code-mapper → csharp-mapper (pre-1.2 installs)
+    if [[ -f "$INSTALL_DIR/code-mapper/CodeMapper" ]] && [[ ! -f "$INSTALL_DIR/csharp-mapper/CSharpMapper" ]]; then
+        info "Migrating legacy code-mapper to csharp-mapper..."
+        mkdir -p "$INSTALL_DIR/csharp-mapper"
+        cp "$INSTALL_DIR/code-mapper/CodeMapper" "$INSTALL_DIR/csharp-mapper/CSharpMapper"
+        chmod +x "$INSTALL_DIR/csharp-mapper/CSharpMapper"
+        info "Migration complete."
+    fi
+
     # Resolve which mappers to install
     if [[ -z "$MAPPERS" ]]; then
         if [[ "$YES" == "true" ]] || ! [ -t 0 ]; then
