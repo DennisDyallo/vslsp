@@ -1,7 +1,7 @@
 # Plan: Unified get_diagnostics + vslsp Integration Test Skill
 
-**Status: SHIPPED — v1.4.0 committed 2026-04-08 (8a76946)**
-**Remaining: session restart needed to complete integration test; detectLanguage() dir bug open**
+**Status: COMPLETE — v1.4.0 released 2026-04-08, 20 assets published, all 8 tools verified end-to-end**
+**detectLanguage() directory bugs fixed (cb26079, 9b9b1da). Integration test passed with zero workarounds.**
 
 ---
 
