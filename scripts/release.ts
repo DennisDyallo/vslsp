@@ -8,11 +8,10 @@
  *
  * Steps:
  *   1. Validate semver version arg
- *   2. Check git working tree has no uncommitted tracked changes
- *   3. Run test suite — abort on failure
- *   4. Bump package.json version
- *   5. Commit, push main, tag, push tag → triggers CI release
- *   6. Rebuild and deploy local binaries (vslsp-mcp, vslsp)
+ *   2. Pre-flight: branch, tag, dirty tree, remote sync, tsc, tests
+ *   3. Bump package.json version (skipped if already at target)
+ *   4. Commit, push main, tag, push tag → triggers CI release
+ *   5. Rebuild and deploy local binaries (vslsp-mcp, vslsp)
  */
 
 import { readFileSync, writeFileSync } from "fs";
@@ -50,6 +49,15 @@ function runPassthrough(cmd: string, args: string[], opts: { failMessage?: strin
   }
 }
 
+function runQuiet(cmd: string, args: string[]): { stdout: string; status: number } {
+  const result = spawnSync(cmd, args, {
+    cwd: ROOT,
+    stdio: ["inherit", "pipe", "pipe"],
+    encoding: "utf-8",
+  });
+  return { stdout: result.stdout?.trim() ?? "", status: result.status ?? 1 };
+}
+
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);
   process.exit(1);
@@ -70,11 +78,10 @@ Examples:
 
 Steps performed:
   1. Validate semver version
-  2. Check no uncommitted tracked changes (untracked files OK)
-  3. Run test suite
-  4. Bump package.json version
-  5. Commit → push main → tag vX.Y.Z → push tag (triggers CI release)
-  6. Build and deploy local binaries to ~/.local/share/vslsp/
+  2. Pre-flight checks (branch, tag, dirty tree, remote sync, tsc, tests)
+  3. Bump package.json version (skipped if already at target)
+  4. Commit → push main → tag vX.Y.Z → push tag (triggers CI release)
+  5. Build and deploy local binaries to ~/.local/share/vslsp/
 `);
   process.exit(version ? 0 : 1);
 }
@@ -83,53 +90,92 @@ if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) {
   fail(`Invalid version "${version}". Expected semver format: 1.2.3 or 1.2.3-rc.1`);
 }
 
-// ── 2. Git dirty check (tracked files only) ────────────────────────────────
+// ── 2. Pre-flight checks (all read-only — no mutations yet) ────────────────
 
-console.log("→ Checking git working tree...");
-const dirty = run("git", ["diff", "--stat", "HEAD"]);
+console.log("→ Pre-flight checks...");
+
+// Branch
+const branch = runQuiet("git", ["branch", "--show-current"]).stdout;
+if (branch !== "main") {
+  fail(`Must release from main branch (currently: ${branch || "detached HEAD"}). Switch to main first.`);
+}
+console.log("  ✓ On main branch");
+
+// Tag must not already exist
+const existingTag = runQuiet("git", ["tag", "-l", `v${version}`]).stdout;
+if (existingTag) {
+  fail(`Tag v${version} already exists. Choose a different version or delete the tag first:\n    git tag -d v${version} && git push origin :refs/tags/v${version}`);
+}
+console.log(`  ✓ Tag v${version} is available`);
+
+// Dirty tree (tracked files only)
+const dirty = runQuiet("git", ["diff", "--stat", "HEAD"]).stdout;
 if (dirty) {
-  fail(
-    `Working tree has uncommitted changes. Commit or stash them first:\n\n${dirty}`
-  );
+  fail(`Working tree has uncommitted changes. Commit or stash them first:\n\n${dirty}`);
 }
 console.log("  ✓ Working tree clean");
 
-// ── 3. Test suite ──────────────────────────────────────────────────────────
+// Remote sync — fetch then check if behind
+console.log("  ↳ Fetching origin/main...");
+const fetchResult = runQuiet("git", ["fetch", "origin", "main"]);
+if (fetchResult.status !== 0) {
+  console.warn("  ⚠ Could not reach origin — skipping remote sync check");
+} else {
+  const behind = runQuiet("git", ["rev-list", "HEAD..origin/main", "--count"]).stdout;
+  if (parseInt(behind, 10) > 0) {
+    fail(`Local main is ${behind} commit(s) behind origin/main. Run 'git pull' first.`);
+  }
+  console.log("  ✓ Local main is up to date with origin");
+}
 
+// TypeScript
+console.log("\n→ Type-checking...");
+runPassthrough("bun", ["run", "tsc", "--noEmit"], { failMessage: "TypeScript errors found. Fix them before releasing." });
+console.log("  ✓ No TypeScript errors");
+
+// Tests
 console.log("\n→ Running test suite...");
 runPassthrough("bun", ["test", "--timeout", "60000"], {
   failMessage: "Tests failed. Fix failures before releasing.",
 });
 console.log("  ✓ All tests pass");
 
-// ── 4. Bump package.json ───────────────────────────────────────────────────
+// ── 3. Bump package.json (conditional) ────────────────────────────────────
 
 console.log(`\n→ Bumping version to ${version}...`);
 const pkg = JSON.parse(readFileSync(PKG_PATH, "utf-8")) as { version: string; [k: string]: unknown };
 const previous = pkg.version;
-pkg.version = version;
-writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + "\n");
-console.log(`  ✓ package.json: ${previous} → ${version}`);
 
-// ── 5. Commit, push, tag ───────────────────────────────────────────────────
+if (previous === version) {
+  console.log(`  ✓ package.json already at ${version} — skipping bump commit`);
+} else {
+  pkg.version = version;
+  writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + "\n");
+  console.log(`  ✓ package.json: ${previous} → ${version}`);
 
-console.log("\n→ Committing version bump...");
-run("git", ["add", "package.json"]);
-run("git", ["commit", "-m", `chore: release v${version}`], {
-  failMessage: "git commit failed",
-});
-console.log("  ✓ Committed");
+  // ── 4a. Commit version bump ──────────────────────────────────────────────
+  console.log("\n→ Committing version bump...");
+  run("git", ["add", "package.json"]);
+  run("git", ["commit", "-m", `chore: release v${version}`], {
+    failMessage: "git commit failed",
+  });
+  console.log("  ✓ Committed");
+}
+
+// ── 4b. Push main ──────────────────────────────────────────────────────────
 
 console.log("\n→ Pushing main...");
 runPassthrough("git", ["push", "origin", "main"], { failMessage: "git push main failed" });
 console.log("  ✓ Pushed main");
 
+// ── 4c. Tag and push ───────────────────────────────────────────────────────
+
 console.log(`\n→ Tagging v${version}...`);
-run("git", ["tag", `v${version}`], { failMessage: `git tag v${version} failed — tag may already exist` });
+run("git", ["tag", `v${version}`], { failMessage: `git tag v${version} failed` });
 runPassthrough("git", ["push", "origin", `v${version}`], { failMessage: "git push tag failed" });
 console.log(`  ✓ Tagged and pushed v${version} → CI release job triggered`);
 
-// ── 6. Deploy local binaries ───────────────────────────────────────────────
+// ── 5. Deploy local binaries ───────────────────────────────────────────────
 
 const INSTALL_DIR = join(homedir(), ".local", "share", "vslsp");
 
