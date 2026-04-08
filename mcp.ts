@@ -51,30 +51,62 @@ const server = new McpServer({
 server.registerTool(
   "get_diagnostics",
   {
-    title: "Get C# Diagnostics",
+    title: "Get Diagnostics",
     description:
-      "Get C# compilation diagnostics (errors, warnings, info, hints) for a .NET solution. " +
-      "Use this to find ALL compilation errors at once instead of running dotnet build which only shows a few at a time. " +
-      "Returns structured diagnostics with file paths, line numbers, and error codes. " +
-      "For persistent sessions, use start_daemon first then set use_daemon=true. Call notify_file_changed after editing files.",
-    inputSchema: {
-      solution: z.string().describe("Absolute path to .sln file"),
-      file: z.string().optional().describe("Filter diagnostics to a specific file path"),
-      timeout: z.number().optional().default(60000).describe("Max wait time in ms for OmniSharp analysis"),
-      quiet_period: z.number().optional().default(5000).describe("Wait time after last diagnostic before considering analysis complete"),
-      use_daemon: z.boolean().optional().default(false).describe("Query running daemon instead of one-shot analysis"),
-      port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port (only used with use_daemon)"),
-    },
+      "Get compilation diagnostics for C#, Rust, or TypeScript — one tool, three overloads. " +
+      "Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript). " +
+      "Returns the same DiagnosticsResult schema for all languages: file paths, line numbers, error codes, severity. " +
+      "C#: runs OmniSharp against a .sln file. " +
+      "Rust: runs cargo check against a Cargo.toml. " +
+      "TypeScript: runs tsc --noEmit against a tsconfig.json.",
+    inputSchema: z.object({
+      // === Provide exactly one (selects language): ===
+      solution: z.string().optional().describe(
+        "C#: absolute path to .sln file. Provide this OR manifest OR project."
+      ),
+      manifest: z.string().optional().describe(
+        "Rust: path to Cargo.toml or directory containing one. Provide this OR solution OR project."
+      ),
+      project: z.string().optional().describe(
+        "TypeScript: path to tsconfig.json or directory containing one. Provide this OR solution OR manifest."
+      ),
+      // === Shared: ===
+      file: z.string().optional().describe("Filter diagnostics to a single source file path."),
+      // === C#-only (ignored for Rust/TypeScript): ===
+      timeout: z.number().optional().default(60000).describe("C# only. Max wait in ms for OmniSharp analysis."),
+      quiet_period: z.number().optional().default(5000).describe("C# only. Wait after last diagnostic before analysis is complete."),
+      use_daemon: z.boolean().optional().default(false).describe("C# only. Query running daemon instead of one-shot analysis."),
+      port: z.number().optional().default(DEFAULT_PORT).describe("C# only. Daemon port (only used with use_daemon)."),
+      // === Rust-only (ignored for C#/TypeScript): ===
+      package: z.string().optional().describe("Rust only. Specific package name in a workspace."),
+      all_targets: z.boolean().optional().default(false).describe("Rust only. Include tests, examples, and benches."),
+    }).refine(
+      (args) => [args.solution, args.manifest, args.project].filter(Boolean).length === 1,
+      { message: "Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript)." }
+    ),
     annotations: {
-      title: "Get C# Diagnostics",
+      title: "Get Diagnostics",
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false,
     },
   },
-  async ({ solution, file, timeout, quiet_period, use_daemon, port }) => {
+  async ({ solution, manifest, project, file, timeout, quiet_period, use_daemon, port, package: rustPackage, all_targets }) => {
     try {
+      // --- Rust ---
+      if (manifest) {
+        const result = await collectRustDiagnostics({ manifest, package: rustPackage, file, allTargets: all_targets });
+        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+      }
+
+      // --- TypeScript ---
+      if (project) {
+        const result = await collectTsDiagnostics({ project, file });
+        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+      }
+
+      // --- C# ---
       log("info", "get_diagnostics", { solution, use_daemon, file });
       if (use_daemon) {
         const result = await query({ port, file, summary: false });
@@ -84,7 +116,7 @@ server.registerTool(
       }
 
       const collector = new DiagnosticsCollector({
-        solutionPath: solution,
+        solutionPath: solution!,
         omnisharpPath: DEFAULT_OMNISHARP,
         timeout,
         quietPeriod: quiet_period,
@@ -449,95 +481,6 @@ server.registerTool(
   }
 );
 
-// --- Rust Diagnostics ---
-
-server.registerTool(
-  "get_rust_diagnostics",
-  {
-    title: "Get Rust Diagnostics",
-    description:
-      "Get Rust compilation diagnostics (errors and warnings) by running cargo check. " +
-      "No daemon required — spawns cargo directly. " +
-      "Returns the same structured schema as get_diagnostics for C#: " +
-      "file paths, line numbers, column numbers, error codes (e.g. E0596), and severity. " +
-      "Use to find all compile errors before or after editing Rust source files. " +
-      "Requires cargo in PATH on the host machine.",
-    inputSchema: {
-      manifest: z.string().describe(
-        "Path to Cargo.toml or directory containing one. " +
-        "For workspaces, point to the workspace root Cargo.toml."
-      ),
-      package: z.string().optional().describe(
-        "Specific package name in a workspace. Omit to check all packages."
-      ),
-      file: z.string().optional().describe(
-        "Filter diagnostics to a specific .rs source file path."
-      ),
-      all_targets: z.boolean().optional().default(false).describe(
-        "Include tests, examples, and benches (cargo check --all-targets)."
-      ),
-    },
-    annotations: {
-      title: "Get Rust Diagnostics",
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async ({ manifest, package: pkg, file, all_targets }) => {
-    try {
-      const result = await collectRustDiagnostics({
-        manifest,
-        package: pkg,
-        file,
-        allTargets: all_targets,
-      });
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-    } catch (e) {
-      return err(e instanceof Error ? e.message : String(e));
-    }
-  }
-);
-
-// --- TypeScript Diagnostics ---
-
-server.registerTool(
-  "get_ts_diagnostics",
-  {
-    title: "Get TypeScript Diagnostics",
-    description:
-      "Get TypeScript compilation diagnostics by running tsc --noEmit. " +
-      "No daemon required — spawns tsc directly. " +
-      "Returns the same structured schema as get_diagnostics for C# and get_rust_diagnostics: " +
-      "file paths, line numbers, column numbers, error codes (e.g. TS2322), and severity. " +
-      "Use to find all type errors before or after editing TypeScript source files. " +
-      "Requires tsconfig.json in the target directory and bun in PATH (uses bunx to resolve tsc).",
-    inputSchema: {
-      project: z.string().describe(
-        "Path to tsconfig.json or directory containing one."
-      ),
-      file: z.string().optional().describe(
-        "Filter diagnostics to a specific .ts/.tsx source file path."
-      ),
-    },
-    annotations: {
-      title: "Get TypeScript Diagnostics",
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async ({ project, file }) => {
-    try {
-      const result = await collectTsDiagnostics({ project, file });
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-    } catch (e) {
-      return err(e instanceof Error ? e.message : String(e));
-    }
-  }
-);
 
 // --- Start server ---
 

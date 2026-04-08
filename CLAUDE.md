@@ -1,6 +1,6 @@
 # vslsp — Agent Reference
 
-MCP server version: **1.3.0** | Tools: **10** | Languages: C#, Rust, TypeScript
+MCP server version: **1.4.0** | Tools: **8** | Languages: C#, Rust, TypeScript
 
 ---
 
@@ -22,9 +22,9 @@ Pick the workflow for the language you're editing:
 
 | Language | Pre-write check | Post-write check |
 |----------|----------------|-----------------|
-| **C#** | `verify_changes` (daemon required) | `get_diagnostics` |
-| **Rust** | — (no dry-run) | `get_rust_diagnostics` |
-| **TypeScript** | — (no dry-run) | `get_ts_diagnostics` |
+| **C#** | `verify_changes` (daemon required) | `get_diagnostics({ solution })` |
+| **Rust** | — (no dry-run) | `get_diagnostics({ manifest })` |
+| **TypeScript** | — (no dry-run) | `get_diagnostics({ project })` |
 
 ---
 
@@ -78,7 +78,7 @@ The daemon applies changes in-memory, waits `settle_ms` for diagnostics to stabi
 ```
 1. get_code_structure({ path: "/path/to/crate" })   ← understand layout
 2. Edit files on disk
-3. get_rust_diagnostics({ manifest: "/path/to/Cargo.toml" })
+3. get_diagnostics({ manifest: "/path/to/Cargo.toml" })
 ```
 
 `manifest` can be the path to `Cargo.toml` or the directory containing it.
@@ -92,7 +92,7 @@ Optional params: `package` (workspace member name), `file` (filter to one file),
 ```
 1. get_code_structure({ path: "/path/to/project" })   ← understand layout
 2. Edit files on disk
-3. get_ts_diagnostics({ project: "/path/to/tsconfig.json" })
+3. get_diagnostics({ project: "/path/to/tsconfig.json" })
 ```
 
 `project` can be the path to `tsconfig.json` or the directory containing it. Optional `file` param filters to one file.
@@ -115,18 +115,25 @@ This downloads only that one binary for the current platform and version. Nothin
 
 ## MCP Tool Reference
 
-### C# Diagnostics
+### Diagnostics (all languages)
 
 ```
-get_diagnostics(solution, file?, timeout?, quiet_period?, use_daemon?, port?)
+get_diagnostics(solution | manifest | project, file?, ...)
   → DiagnosticsResult
-  solution: absolute path to .sln file
-  file: filter results to a single file
-  use_daemon: true = query running daemon instead of spawning OmniSharp fresh
+  Provide exactly one of:
+    solution: C# — absolute path to .sln file
+    manifest: Rust — path to Cargo.toml or directory containing one
+    project:  TypeScript — path to tsconfig.json or directory containing one
+  file: filter results to a single source file (all languages)
+
+  C#-only params: timeout?, quiet_period?, use_daemon?, port?
+    use_daemon: true = query running daemon instead of spawning OmniSharp fresh
+  Rust-only params: package?, all_targets?
+    package: workspace member name; all_targets: include tests/benches
 
 get_diagnostics_summary(solution, use_daemon?, port?)
   → { errors, warnings, info, hints }
-  Use this first to check if there are any errors at all before pulling full detail.
+  C# only. Use this first to check for errors before pulling full detail.
 
 start_daemon(solution, port?)
   → { status, port, solution, ready }
@@ -146,25 +153,6 @@ verify_changes(changes[{file, content}], settle_ms?, timeout_ms?, port?)
   → DiagnosticsResult + { verified_files, reverted: true }
   REQUIRES: running daemon with ready: true
   Changes are applied in-memory and reverted — disk is never written.
-```
-
-### Rust Diagnostics
-
-```
-get_rust_diagnostics(manifest, package?, file?, all_targets?)
-  → DiagnosticsResult
-  manifest: path to Cargo.toml or directory containing one
-  package: workspace member name (omit for default package)
-  all_targets: true to include tests, benches, examples
-```
-
-### TypeScript Diagnostics
-
-```
-get_ts_diagnostics(project, file?)
-  → DiagnosticsResult
-  project: path to tsconfig.json or directory containing one
-  file: filter to a single .ts file
 ```
 
 ### Code Structure
@@ -257,7 +245,7 @@ Every member always emits all fields (no nulls):
 
 | File | Owns |
 |------|------|
-| `mcp.ts` | All 10 MCP tool registrations, tool schemas, version string |
+| `mcp.ts` | All 8 MCP tool registrations, tool schemas, version string |
 | `vslsp.ts` | CLI entry point, `install-mapper` command |
 | `src/core/types.ts` | `DiagnosticsResult`, `DiagnosticEntry`, shared types |
 | `src/core/defaults.ts` | `DEFAULT_PORT`, `DEFAULT_VSLSP`, `DEFAULT_OMNISHARP`, binary paths |
@@ -302,7 +290,7 @@ bun build --compile tools/ts-mapper/main.ts --outfile TSMapper
 ## Verify Correctness (Dev)
 
 ```bash
-# Tool count (must be 10)
+# Tool count (must be 8)
 grep -c "registerTool" mcp.ts
 
 # TypeScript clean

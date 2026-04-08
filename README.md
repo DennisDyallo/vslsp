@@ -79,11 +79,11 @@ C# projects:
 
 Rust projects:
 - Call get_code_structure(path) on the crate directory to understand module and type layout.
-- After editing files, call get_rust_diagnostics(manifest) with the path to Cargo.toml to check for errors.
+- After editing files, call get_diagnostics(manifest) with the path to Cargo.toml to check for errors.
 
 TypeScript projects:
 - Call get_code_structure(path) on the project directory to understand classes, interfaces, and types.
-- After editing files, call get_ts_diagnostics(project) with the path to tsconfig.json (or the directory containing it) to check for errors.
+- After editing files, call get_diagnostics(project) with the path to tsconfig.json (or the directory containing it) to check for errors.
 
 Prefer get_code_structure over reading individual source files when you need to understand what exists.
 All paths passed to vslsp tools must be absolute.
@@ -129,7 +129,7 @@ get_code_structure(dir)               ← understand crate structure
          ↓
 edit files on disk
          ↓
-get_rust_diagnostics(Cargo.toml)      ← run cargo check, get structured results
+get_diagnostics(Cargo.toml)           ← run cargo check, get structured results
 ```
 
 > **First-time Rust setup:** Run `vslsp install-mapper rust` before first use. Without it, `get_code_structure` will report "binary not found".
@@ -141,7 +141,7 @@ get_code_structure(dir)                ← understand project structure
          ↓
 edit files on disk
          ↓
-get_ts_diagnostics(tsconfig.json)      ← run tsc --noEmit, get structured results
+get_diagnostics(tsconfig.json)         ← run tsc --noEmit, get structured results
 ```
 
 Pass the path to `tsconfig.json` directly, or the directory containing it — vslsp will find it automatically. If your project has multiple tsconfig files (e.g. `tsconfig.build.json`), pass the specific one you want checked.
@@ -152,15 +152,13 @@ Pass the path to `tsconfig.json` directly, or the directory containing it — vs
 
 | Tool | Language | Purpose |
 |------|----------|---------|
-| `get_diagnostics` | C# | All compilation errors and warnings for a solution |
+| `get_diagnostics` | C# / Rust / TypeScript | Compilation errors and warnings — pass `solution` (C#), `manifest` (Rust), or `project` (TypeScript) |
 | `get_diagnostics_summary` | C# | Error/warning/info/hint counts only |
 | `start_daemon` | C# | Start persistent OmniSharp analysis server |
 | `stop_daemon` | C# | Stop it |
 | `get_daemon_status` | C# | Check if ready (poll this after start_daemon) |
 | `notify_file_changed` | C# | Tell daemon a file was saved to disk |
 | `verify_changes` | C# | Dry-run compile check for proposed edits — daemon required |
-| `get_rust_diagnostics` | Rust | All cargo check errors and warnings |
-| `get_ts_diagnostics` | TypeScript | All tsc --noEmit errors and warnings |
 | `get_code_structure` | All | Structured AST code map — types, methods, fields, signatures |
 
 ## Requirements
@@ -178,7 +176,7 @@ Pass the path to `tsconfig.json` directly, or the directory containing it — vs
 ### TypeScript features
 
 - TypeScript compiler accessible as `tsc` or via `bunx`/`npx` — verify with `tsc --version`
-- A `tsconfig.json` in your project (or pass its directory path to `get_ts_diagnostics`)
+- A `tsconfig.json` in your project (or pass its directory path to `get_diagnostics`)
 - TSMapper installed: `vslsp install-mapper typescript`
 
 ## Verify your install
@@ -247,7 +245,7 @@ get_diagnostics({ solution: "...", use_daemon: true, port: 7851 })
 stop_daemon({ port: 7851 })
 ```
 
-**get_code_structure / get_rust_diagnostics: "binary not found"**
+**get_code_structure / get_diagnostics: "binary not found"**
 
 The mapper for that language isn't installed. Run:
 

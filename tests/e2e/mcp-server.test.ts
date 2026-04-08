@@ -29,8 +29,6 @@ const EXPECTED_TOOLS = [
   "stop_daemon",
   "notify_file_changed",
   "verify_changes",
-  "get_rust_diagnostics",
-  "get_ts_diagnostics",
 ];
 
 let client: Client;
@@ -169,7 +167,7 @@ describe("MCP Server Handshake", () => {
     const { tools } = await client.listTools();
 
     // Exact count
-    expect(tools).toBeArrayOfSize(10);
+    expect(tools).toBeArrayOfSize(8);
 
     // All expected names present
     const names = tools.map((t) => t.name).sort();
@@ -186,10 +184,10 @@ describe("MCP Server Handshake", () => {
 
 // --- TypeScript Diagnostics ---
 
-describe("get_ts_diagnostics via MCP", () => {
+describe("get_diagnostics (TypeScript) via MCP", () => {
   test("detects type errors in fixture project", async () => {
     const result = await client.callTool({
-      name: "get_ts_diagnostics",
+      name: "get_diagnostics",
       arguments: { project: FIXTURE_DIR },
     });
 
@@ -223,7 +221,7 @@ describe("get_ts_diagnostics via MCP", () => {
 
   test("file filter restricts results to matching file", async () => {
     const result = await client.callTool({
-      name: "get_ts_diagnostics",
+      name: "get_diagnostics",
       arguments: { project: FIXTURE_DIR, file: "broken.ts" },
     });
 
@@ -236,7 +234,7 @@ describe("get_ts_diagnostics via MCP", () => {
 
   test("clean project returns clean=true with zero errors", async () => {
     const result = await client.callTool({
-      name: "get_ts_diagnostics",
+      name: "get_diagnostics",
       arguments: { project: FIXTURE_DIR, file: "clean.ts" },
     });
 
@@ -251,7 +249,7 @@ describe("get_ts_diagnostics via MCP", () => {
 
   test("returns error for nonexistent tsconfig", async () => {
     const result = await client.callTool({
-      name: "get_ts_diagnostics",
+      name: "get_diagnostics",
       arguments: { project: "/nonexistent/path/to/project" },
     });
 
@@ -263,10 +261,10 @@ describe("get_ts_diagnostics via MCP", () => {
 
 // --- Rust Diagnostics ---
 
-describe("get_rust_diagnostics via MCP", () => {
+describe("get_diagnostics (Rust) via MCP", () => {
   test("returns clean DiagnosticsResult for rust-mapper", async () => {
     const result = await client.callTool({
-      name: "get_rust_diagnostics",
+      name: "get_diagnostics",
       arguments: { manifest: join(PROJECT_ROOT, "tools/rust-mapper") },
     });
 
@@ -281,7 +279,7 @@ describe("get_rust_diagnostics via MCP", () => {
 
   test("returns error for nonexistent Cargo.toml", async () => {
     const result = await client.callTool({
-      name: "get_rust_diagnostics",
+      name: "get_diagnostics",
       arguments: { manifest: "/nonexistent/rust/project" },
     });
 
@@ -545,14 +543,14 @@ describe("server error resilience", () => {
   test("server survives multiple error responses and handles subsequent calls", async () => {
     // First error: bad TS project
     const tsError = await client.callTool({
-      name: "get_ts_diagnostics",
+      name: "get_diagnostics",
       arguments: { project: "/nonexistent" },
     });
     expect(tsError.isError).toBe(true);
 
     // Second error: bad Rust manifest
     const rustError = await client.callTool({
-      name: "get_rust_diagnostics",
+      name: "get_diagnostics",
       arguments: { manifest: "/nonexistent" },
     });
     expect(rustError.isError).toBe(true);
@@ -566,7 +564,7 @@ describe("server error resilience", () => {
 
     // Valid request after three errors — server must still work
     const { tools } = await client.listTools();
-    expect(tools).toBeArrayOfSize(10);
+    expect(tools).toBeArrayOfSize(8);
 
     // Valid tool call after errors — confirm full functionality
     const statusResult = await client.callTool({
