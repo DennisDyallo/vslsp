@@ -1,5 +1,10 @@
 # Plan: Unified get_diagnostics + vslsp Integration Test Skill
 
+**Status: SHIPPED — v1.4.0 committed 2026-04-08 (8a76946)**
+**Remaining: session restart needed to complete integration test; detectLanguage() dir bug open**
+
+---
+
 ## Context
 
 Two problems to solve together:
