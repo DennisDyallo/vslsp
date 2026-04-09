@@ -1,6 +1,6 @@
 # vslsp — Agent Reference
 
-MCP server version: **1.5.0** | Tools: **8** | Languages: C#, Rust, TypeScript
+MCP server version: **1.6.0** | Tools: **8** | Languages: C#, Rust, TypeScript
 
 ---
 
