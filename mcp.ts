@@ -86,6 +86,13 @@ function matchGlob(filePath: string, pattern: string): boolean {
   return false;
 }
 
+/**
+ * AX context window budget: maximum response size for get_code_structure.
+ * Responses exceeding this are automatically truncated (files removed from end)
+ * with a warning field explaining what happened and how to scope further.
+ */
+const AX_BUDGET_BYTES = 200_000;
+
 /** Apply post-processing filters to a get_code_structure JSON result. */
 function filterCodeStructure(
   parsed: any,
@@ -103,20 +110,85 @@ function filterCodeStructure(
       .map(f => ({ ...f, members: applyDepth(f.members ?? [], opts.depth!) }))
       .filter(f => f.members.length > 0);
   }
-  // Max files cap
+  // Max files cap (explicit)
   if (opts.max_files !== undefined) {
     files = files.slice(0, opts.max_files);
   }
 
-  // Recompute summary
-  const totalMembers = files.flatMap(f => f.members ?? []);
+  // AX byte-budget truncation: if no explicit max_files and response exceeds budget,
+  // progressively remove files from the end until under budget.
+  let axTruncated = false;
+  let preCapFileCount = files.length;
+  if (opts.max_files === undefined) {
+    const probe = buildResult(files, opts.autoDetected);
+    const probeSize = JSON.stringify(probe, null, 2).length;
+    if (probeSize > AX_BUDGET_BYTES && files.length > 1) {
+      // Binary search for the largest file count that fits within budget
+      // Use pretty-printed JSON (null, 2) to match actual MCP response format
+      let lo = 1, hi = files.length;
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        const candidate = buildResult(files.slice(0, mid), opts.autoDetected);
+        if (JSON.stringify(candidate, null, 2).length <= AX_BUDGET_BYTES) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      files = files.slice(0, lo);
+      axTruncated = true;
+    }
+  }
+
+  const result = buildResult(files, opts.autoDetected);
+
+  // Build AX warning — merge with any existing warning (e.g. auto-detection) instead of overwriting
+  if (axTruncated) {
+    const axMsg =
+      `Response truncated from ${preCapFileCount} to ${files.length} files to fit context window budget (${Math.round(AX_BUDGET_BYTES / 1000)}KB). ` +
+      `Use file_filter (e.g. "src/**") or max_files to scope results.`;
+    result.warning = result.warning ? result.warning + " " + axMsg : axMsg;
+  }
+
+  // Single-file edge case: if even 1 file exceeds budget, warn but return it
+  if (!axTruncated && opts.max_files === undefined && files.length > 0) {
+    const size = JSON.stringify(result, null, 2).length;
+    if (size > AX_BUDGET_BYTES) {
+      const sizeKB = Math.round(size / 1000);
+      const msg =
+        `Response (${sizeKB}KB) exceeds context window budget (${Math.round(AX_BUDGET_BYTES / 1000)}KB). ` +
+        `Try depth: "types" or depth: "signatures" to reduce output, or use file_filter to narrow scope.`;
+      result.warning = result.warning ? result.warning + " " + msg : msg;
+    }
+  }
+
+  return result;
+}
+
+/** Count Namespace members recursively. */
+function countNamespaces(members: any[]): number {
+  let count = 0;
+  for (const m of members) {
+    if (m.type === "Namespace") count++;
+    if (m.children?.length) count += countNamespaces(m.children);
+  }
+  return count;
+}
+
+/** Build the final result object with recomputed summary and optional warnings. */
+function buildResult(
+  files: any[],
+  autoDetected: boolean,
+): any {
+  const totalMembers = files.flatMap((f: any) => f.members ?? []);
   const { types, methods } = countMembers(totalMembers);
-  const summary = { files: files.length, namespaces: parsed.summary?.namespaces ?? 0, types, methods };
+  const namespaces = countNamespaces(totalMembers);
+  const summary = { files: files.length, namespaces, types, methods };
 
   const result: any = { summary, files };
 
   // Auto-detection warning: no explicit language and zero files returned
-  if (opts.autoDetected && files.length === 0) {
+  if (autoDetected && files.length === 0) {
     result.warning =
       "Language was auto-detected but 0 files were found. " +
       "If this is a TypeScript, Rust, or C# project, pass language: \"typescript\", \"rust\", or \"csharp\" explicitly.";
