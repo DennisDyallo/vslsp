@@ -186,6 +186,8 @@ describe("MCP Server Handshake", () => {
 
 describe("get_diagnostics (TypeScript) via MCP", () => {
   test("detects type errors in fixture project", async () => {
+    // Intentionally unfiltered (no severity, no limit) — fixture is tiny so no AX warning fires.
+    // This validates the full DiagnosticsResult schema shape, not the filtering surface.
     const result = await client.callTool({
       name: "get_diagnostics",
       arguments: { project: FIXTURE_DIR },

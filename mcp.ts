@@ -98,6 +98,13 @@ function matchGlob(filePath: string, pattern: string): boolean {
  */
 const AX_BUDGET_BYTES = 200_000;
 
+/**
+ * AX warning threshold for get_diagnostics: when an unfiltered response exceeds
+ * this size, a warning field is added directing the agent to use severity/limit.
+ * No truncation — semantics are preserved. Warning only.
+ */
+const AX_DIAG_WARN_BYTES = 50_000;
+
 /** Apply post-processing filters to a get_code_structure JSON result. */
 function filterCodeStructure(
   parsed: any,
@@ -214,6 +221,23 @@ function buildResult(
 /** Severity ordering: lower = more severe. */
 const SEVERITY_ORDER: Record<string, number> = { error: 0, warning: 1, info: 2, hint: 3 };
 
+/**
+ * AX warning for get_diagnostics: when called without severity/limit filters
+ * and the response exceeds AX_DIAG_WARN_BYTES, attach a warning field directing
+ * the agent to scope results. Semantics are preserved — no truncation.
+ */
+function withDiagnosticsAxWarning(result: any, severity?: string, limit?: number): any {
+  if (severity !== undefined || limit !== undefined) return result; // already filtered
+  const size = JSON.stringify(result, null, 2).length;
+  if (size <= AX_DIAG_WARN_BYTES) return result;
+  const totalDiags = (result.files ?? []).reduce((n: number, f: any) => n + (f.diagnostics?.length ?? 0), 0);
+  const msg =
+    `Unfiltered response (${Math.round(size / 1000)}KB, ${totalDiags} diagnostics) may consume your context window budget. ` +
+    `Use severity:'error' and limit:20 for a focused response under 10KB. ` +
+    `Example: get_diagnostics({ project: "...", severity: "error", limit: 20 })`;
+  return { ...result, warning: msg };
+}
+
 /** Filter a DiagnosticsResult by minimum severity and total limit. */
 function filterDiagnostics(result: any, minSeverity?: string, limit?: number): any {
   if (!minSeverity && limit === undefined) return result;
@@ -323,14 +347,14 @@ server.registerTool(
       // --- Rust ---
       if (manifest) {
         const raw = await collectRustDiagnostics({ manifest, package: rustPackage, file, allTargets: all_targets });
-        const result = filterDiagnostics(raw, severity, limit);
+        const result = withDiagnosticsAxWarning(filterDiagnostics(raw, severity, limit), severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
       // --- TypeScript ---
       if (project) {
         const raw = await collectTsDiagnostics({ project, file });
-        const result = filterDiagnostics(raw, severity, limit);
+        const result = withDiagnosticsAxWarning(filterDiagnostics(raw, severity, limit), severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
@@ -338,7 +362,7 @@ server.registerTool(
       log("info", "get_diagnostics", { solution, use_daemon, file });
       if (use_daemon) {
         const raw = await query({ port, file, summary: false });
-        const result = filterDiagnostics(raw.data, severity, limit);
+        const result = withDiagnosticsAxWarning(filterDiagnostics(raw.data, severity, limit), severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
@@ -357,7 +381,7 @@ server.registerTool(
         result.clean = result.summary.errors === 0;
       }
 
-      const filtered = filterDiagnostics(result, severity, limit);
+      const filtered = withDiagnosticsAxWarning(filterDiagnostics(result, severity, limit), severity, limit);
       return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
     } catch (e) {
       log("error", "tool error", { tool: "get_diagnostics", message: e instanceof Error ? e.message : String(e) });
