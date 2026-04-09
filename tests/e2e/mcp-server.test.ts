@@ -335,6 +335,50 @@ describe("get_diagnostics (TypeScript) via MCP", () => {
     const size = (result as any).content[0].text.length;
     expect(size).toBeLessThan(10_000); // 20 errors must fit in 10KB
   }, 30_000);
+
+  test("B5: withDiagnosticsAxWarning fires on large unfiltered response and is absent when filtered", async () => {
+    const AX_WARN_DIR = join(PROJECT_ROOT, "tests", "fixtures", "_ax_diag_warn_test");
+    mkdirSync(join(AX_WARN_DIR, "src"), { recursive: true });
+    writeFileSync(join(AX_WARN_DIR, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, noEmit: true, target: "ES2020", module: "ES2020", moduleResolution: "bundler", skipLibCheck: true },
+      include: ["src"],
+    }));
+
+    // 20 files × 15 type errors each = ~300 errors → response > 50KB
+    for (let i = 0; i < 20; i++) {
+      const errors = Array.from({ length: 15 }, (_, j) =>
+        `const x${j}_${i}: number = "string_value_${j}"; // TS2322`
+      ).join("\n");
+      writeFileSync(join(AX_WARN_DIR, "src", `errors${i}.ts`), errors);
+    }
+
+    try {
+      // Unfiltered call — should trigger AX warning if response > 50KB
+      const unfilteredResult = await client.callTool({
+        name: "get_diagnostics",
+        arguments: { project: AX_WARN_DIR },
+      });
+      const unfilteredData = parseToolResult(unfilteredResult);
+      const unfilteredSize = (unfilteredResult as any).content[0].text.length;
+
+      if (unfilteredSize > 50_000) {
+        expect(unfilteredData.warning).toBeDefined();
+        expect(unfilteredData.warning).toContain("context window budget");
+        expect(unfilteredData.warning).toContain("severity");
+        expect(unfilteredData.warning).toContain("limit");
+      }
+
+      // Filtered call — AX warning must be absent
+      const filteredResult = await client.callTool({
+        name: "get_diagnostics",
+        arguments: { project: AX_WARN_DIR, severity: "error", limit: 20 },
+      });
+      const filteredData = parseToolResult(filteredResult);
+      expect(filteredData.warning).toBeUndefined();
+    } finally {
+      rmSync(AX_WARN_DIR, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 // --- Rust Diagnostics ---
@@ -628,6 +672,21 @@ describe("get_code_structure via MCP", () => {
       }
     }, 30_000);
 
+    test("A3b: file_filter matching 0 files produces warning with pattern and guidance", async () => {
+      if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
+      const result = await client.callTool({
+        name: "get_code_structure",
+        arguments: { path: PROJECT_ROOT, language: "typescript", file_filter: "nonexistent_xyz_pattern/**" },
+      });
+      expect(result.isError).toBeFalsy();
+      const data = parseToolResult(result);
+      expect(data.files).toHaveLength(0);
+      expect(data.warning).toBeDefined();
+      expect(data.warning).toContain("nonexistent_xyz_pattern/**");
+      expect(data.warning).toContain("matched 0");
+      expect(data.warning).toContain("src/**");
+    }, 30_000);
+
     test("A4: max_files caps returned file count and summary", async () => {
       if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
 
@@ -639,6 +698,20 @@ describe("get_code_structure via MCP", () => {
 
       expect(data.files.length).toBeLessThanOrEqual(2);
       expect(data.summary.files).toBeLessThanOrEqual(2);
+    }, 30_000);
+
+    test("A4b: max_files: 0 returns empty files array with valid summary schema", async () => {
+      if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
+      const result = await client.callTool({
+        name: "get_code_structure",
+        arguments: { path: PROJECT_ROOT, language: "typescript", max_files: 0 },
+      });
+      expect(result.isError).toBeFalsy();
+      const data = parseToolResult(result);
+      expect(data).toHaveProperty("summary");
+      expect(data).toHaveProperty("files");
+      expect(data.files).toHaveLength(0);
+      expect(data.summary.files).toBe(0);
     }, 30_000);
 
     test("A6: AX byte-budget auto-truncation fires for oversized output", async () => {
@@ -732,6 +805,9 @@ describe("get_code_structure via MCP", () => {
       expect(data.warning).toBeDefined();
       expect(data.warning).toContain("auto-detected");
       expect(data.warning).toContain("language:");
+      expect(data.warning).toContain('"typescript"');
+      expect(data.warning).toContain('"rust"');
+      expect(data.warning).toContain('"csharp"');
     }, 30_000);
   });
 });

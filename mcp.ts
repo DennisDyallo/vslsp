@@ -178,7 +178,7 @@ function filterCodeStructure(
       const sizeKB = Math.round(size / 1000);
       const msg =
         `Response (${sizeKB}KB) exceeds context window budget (${Math.round(AX_BUDGET_BYTES / 1000)}KB). ` +
-        `Try depth: "types" or depth: "signatures" to reduce output, or use file_filter to narrow scope.`;
+        `Try depth: "signatures" to stay within budget — it reduces output ~10x. If you need complete output, read the file directly instead of using get_code_structure.`;
       result.warning = result.warning ? result.warning + " " + msg : msg;
     }
   }
@@ -281,6 +281,18 @@ function acquireVerifyLock(): Promise<() => void> {
   return prev.then(() => release!);
 }
 
+/** Enrich raw errors with agent-actionable guidance for common OS error patterns. */
+function enrichError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.includes("ENOENT") || (msg.toLowerCase().includes("not found") && !msg.includes("install-mapper"))) {
+    return msg + " Check the path is correct and the file or directory exists.";
+  }
+  if (msg.includes("EACCES") || msg.includes("permission denied")) {
+    return msg + " Check file permissions.";
+  }
+  return msg;
+}
+
 const server = new McpServer({
   name: "vslsp",
   version: pkg.version,
@@ -316,11 +328,13 @@ server.registerTool(
       file: z.string().optional().describe("Filter diagnostics to a single source file path."),
       severity: z.enum(["error", "warning", "info", "hint"]).optional().describe(
         "Minimum severity to include. 'error' = errors only; 'warning' = errors + warnings; etc. Default: all. " +
-        "Without this, large codebases may return hundreds of diagnostics — use 'error' to stay within the context window budget."
+        "Without this, large codebases may return hundreds of diagnostics — responses over 50KB include an AX warning. " +
+        "Use 'error' to stay within the context window budget."
       ),
       limit: z.number().optional().describe(
         "Maximum total diagnostics to return across all files. Use 20–50 for a quick overview. " +
-        "Without a limit, all matching diagnostics are returned; combine with severity:'error' for a focused response under 10KB."
+        "Without both severity and limit, responses over 50KB include an AX warning directing you to filter. " +
+        "Combine with severity:'error' for a focused response under 10KB."
       ),
       // === C#-only (ignored for Rust/TypeScript): ===
       timeout: z.number().optional().default(60000).describe("C# only. Max wait in ms for OmniSharp analysis."),
@@ -385,7 +399,7 @@ server.registerTool(
       return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
     } catch (e) {
       log("error", "tool error", { tool: "get_diagnostics", message: e instanceof Error ? e.message : String(e) });
-      return err(e instanceof Error ? e.message : String(e));
+      return err(enrichError(e));
     }
   }
 );
@@ -432,7 +446,7 @@ server.registerTool(
         content: [{ type: "text" as const, text: JSON.stringify(result.summary, null, 2) }],
       };
     } catch (e) {
-      return err(e instanceof Error ? e.message : String(e));
+      return err(enrichError(e));
     }
   }
 );
@@ -465,7 +479,7 @@ server.registerTool(
         "Output detail level. " +
         "'types': type names only, no methods — fits within 30KB AX budget. " +
         "'signatures': types + method signatures, no nested children — fits within 200KB context window budget (default). " +
-        "'full': complete recursive output — opt-in; use only for single files, on directories may exceed 1MB."
+        "'full': complete recursive output — opt-in; use only for single files, on directories may exceed 1MB. Even single files over 200KB exceed the context budget — prefer 'signatures' in that case."
       ),
       file_filter: z.string().optional().describe(
         "Glob pattern to filter files (e.g. 'src/Core/**', '**/*.service.ts'). Applied before depth and max_files. " +
@@ -512,7 +526,7 @@ server.registerTool(
 
       return { content: [{ type: "text" as const, text: result.output }] };
     } catch (e) {
-      return err(e instanceof Error ? e.message : String(e));
+      return err(enrichError(e));
     }
   }
 );
@@ -577,7 +591,7 @@ server.registerTool(
       }
     } catch (e) {
       log("error", "tool error", { tool: "start_daemon", message: e instanceof Error ? e.message : String(e) });
-      return err(e instanceof Error ? e.message : String(e));
+      return err(enrichError(e));
     }
   }
 );
@@ -609,7 +623,7 @@ server.registerTool(
       if ((e as any).code === "DAEMON_NOT_RUNNING") {
         return ok({ status: "not_running", port });
       }
-      return err(e instanceof Error ? e.message : String(e));
+      return err(enrichError(e));
     }
   }
 );
@@ -637,7 +651,7 @@ server.registerTool(
       await stop(port);
       return ok({ status: "stopped", port });
     } catch (e) {
-      return err(e instanceof Error ? e.message : String(e));
+      return err(enrichError(e));
     }
   }
 );
@@ -670,7 +684,7 @@ server.registerTool(
       const result = await notify({ port, file, content });
       return ok({ ...result });
     } catch (e) {
-      return err(e instanceof Error ? e.message : String(e));
+      return err(enrichError(e));
     }
   }
 );
