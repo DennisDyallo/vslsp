@@ -5,13 +5,11 @@ import { query, status, notify } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CSHARP_MAPPER } from "./src/core/defaults";
 import { getMapper } from "./src/code-mapping/registry";
-import { existsSync } from "fs";
-import { mkdirSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync } from "fs";
+import { join, resolve } from "path";
 
 // Embedded at build time via --define "VSLSP_VERSION=\"x.y.z\""
 declare const VSLSP_VERSION: string;
-import { resolve } from "path";
 
 const HELP = `
 vslsp - C# LSP Diagnostics Tool

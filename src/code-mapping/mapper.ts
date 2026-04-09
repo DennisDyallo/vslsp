@@ -2,6 +2,7 @@ import { resolve } from "path";
 import { existsSync } from "fs";
 import { DEFAULT_CSHARP_MAPPER } from "../core/defaults";
 import { detectLanguage, getMapper } from "./registry";
+import { log } from "../core/logger";
 
 export interface MapOptions {
   path: string;
@@ -14,6 +15,7 @@ export interface MapOptions {
 export interface MapResult {
   output: string;
   exitCode: number;
+  stderr?: string;
 }
 
 export async function map(options: MapOptions): Promise<MapResult> {
@@ -66,8 +68,10 @@ export async function map(options: MapOptions): Promise<MapResult> {
 
   const exitCode = await proc.exited;
 
-  // stdout is the structured output; stderr is progress/errors
-  const output = (stdout + (stderr ? "\n" + stderr : "")).trim();
+  // stdout is structured output; stderr is progress/errors — keep separate
+  if (stderr.trim()) {
+    log("warn", "mapper stderr", { binary: binaryPath, stderr: stderr.trim() });
+  }
 
-  return { output, exitCode };
+  return { output: stdout.trim(), exitCode, stderr: stderr.trim() || undefined };
 }

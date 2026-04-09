@@ -281,11 +281,20 @@ fn visibility_to_string(vis: &syn::Visibility) -> String {
 
 /// Returns the `pub`/`pub(crate)` prefix to prepend to a signature string,
 /// so signatures match source code verbatim.
-fn vis_prefix_str(vis: &syn::Visibility) -> &'static str {
+fn vis_prefix_str(vis: &syn::Visibility) -> String {
     match vis {
-        syn::Visibility::Public(_) => "pub ",
-        syn::Visibility::Restricted(_) => "pub(...) ",
-        syn::Visibility::Inherited => "",
+        syn::Visibility::Public(_) => "pub ".into(),
+        syn::Visibility::Restricted(r) => {
+            let path = r
+                .path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            format!("pub({}) ", path)
+        }
+        syn::Visibility::Inherited => String::new(),
     }
 }
 

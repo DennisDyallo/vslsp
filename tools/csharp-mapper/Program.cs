@@ -145,7 +145,7 @@ class Program
         foreach (var m in members)
         {
             if (m.Type == "Namespace") namespaces++;
-            else if (m.Type is "Class" or "Interface" or "Record" or "Enum") types++;
+            else if (m.Type is "Class" or "Struct" or "Interface" or "Record" or "Enum") types++;
             else if (m.Type is "Method" or "Constructor") methods++;
             // Field, Property, Variant excluded from summary (consistent with RustMapper)
             CountMembersRecursive(m.Children, ref namespaces, ref types, ref methods);
@@ -357,7 +357,6 @@ public class StructureCollector : CSharpSyntaxWalker
 {
     public FileNode RootNode { get; }
     private Stack<CodeMember> _stack = new();
-    private string? _currentNamespace;
 
     public StructureCollector(string filePath)
     {
@@ -515,20 +514,18 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitNamespaceDeclaration(NamespaceDeclarationSyntax node)
     {
-        _currentNamespace = node.Name.ToString();
-        PushMember("Namespace", _currentNamespace, node, default, visibilityOverride: "");
+        var nsName = node.Name.ToString();
+        PushMember("Namespace", nsName, node, default, visibilityOverride: "");
         base.VisitNamespaceDeclaration(node);
         _stack.Pop();
-        _currentNamespace = null;
     }
 
     public override void VisitFileScopedNamespaceDeclaration(FileScopedNamespaceDeclarationSyntax node)
     {
-        _currentNamespace = node.Name.ToString();
-        PushMember("Namespace", _currentNamespace, node, default, visibilityOverride: "");
+        var nsName = node.Name.ToString();
+        PushMember("Namespace", nsName, node, default, visibilityOverride: "");
         base.VisitFileScopedNamespaceDeclaration(node);
         _stack.Pop();
-        _currentNamespace = null;
     }
 
     // ── Types ─────────────────────────────────────────────────────────────────
@@ -541,6 +538,17 @@ public class StructureCollector : CSharpSyntaxWalker
         PushMember("Class", $"{modPrefix}class {node.Identifier.Text}{typeParams}",
             node, node.Modifiers, node.AttributeLists, node.BaseList);
         base.VisitClassDeclaration(node);
+        _stack.Pop();
+    }
+
+    public override void VisitStructDeclaration(StructDeclarationSyntax node)
+    {
+        if (!IsPublicOrInternal(node.Modifiers)) return;
+        string modPrefix = BuildModifierPrefix(node.Modifiers);
+        string typeParams = TypeParamsToString(node.TypeParameterList);
+        PushMember("Struct", $"{modPrefix}struct {node.Identifier.Text}{typeParams}",
+            node, node.Modifiers, node.AttributeLists, node.BaseList);
+        base.VisitStructDeclaration(node);
         _stack.Pop();
     }
 

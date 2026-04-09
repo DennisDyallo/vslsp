@@ -11,6 +11,7 @@ import {
 } from "vscode-languageserver-protocol";
 import type { LSPClientOptions } from "./types";
 import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
 
 export class LSPClient {
   private process: ChildProcess | null = null;
@@ -139,7 +140,7 @@ export class LSPClient {
 
     let text = content;
     if (!text) {
-      const path = uri.startsWith("file://") ? uri.slice(7) : uri;
+      const path = uri.startsWith("file://") ? fileURLToPath(uri) : uri;
       text = readFileSync(path, "utf-8");
     }
 
@@ -185,30 +186,11 @@ export class LSPClient {
     const fileUri = uri.startsWith("file://") ? uri : `file://${uri}`;
 
     // Read fresh content from disk
-    const path = uri.startsWith("file://") ? uri.slice(7) : uri;
+    const path = uri.startsWith("file://") ? fileURLToPath(uri) : uri;
     const text = readFileSync(path, "utf-8");
 
-    // If file wasn't open, open it first
-    if (!this.openDocuments.has(fileUri)) {
-      await this.didOpen(uri, text);
-      // Force re-analysis by sending didChange after didOpen
-      // OmniSharp may not analyze on didOpen alone
-      const version = (this.openDocuments.get(fileUri) || 0) + 1;
-      this.openDocuments.set(fileUri, version);
-      console.error(`[LSP] didChange (post-open): ${fileUri} v${version}`);
-      await this.connection.sendNotification("textDocument/didChange", {
-        textDocument: { uri: fileUri, version },
-        contentChanges: [{ text }],
-      });
-    } else {
-      // Update with disk content
-      const version = (this.openDocuments.get(fileUri) || 0) + 1;
-      this.openDocuments.set(fileUri, version);
-      await this.connection.sendNotification("textDocument/didChange", {
-        textDocument: { uri: fileUri, version },
-        contentChanges: [{ text }],
-      });
-    }
+    // Delegate to didChange — handles didOpen if needed + sends content update
+    await this.didChange(uri, text);
 
     await this.connection.sendNotification("textDocument/didSave", {
       textDocument: { uri: fileUri },

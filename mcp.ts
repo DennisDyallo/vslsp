@@ -447,7 +447,13 @@ server.registerTool(
       const result = await map({ path, format: effectiveFormat, language });
 
       if (effectiveFormat === "json") {
-        const parsed = JSON.parse(result.output);
+        let parsed: any;
+        try {
+          parsed = JSON.parse(result.output);
+        } catch {
+          const detail = result.stderr ? ` Mapper stderr: ${result.stderr}` : "";
+          return err(`Failed to parse mapper JSON output.${detail}`);
+        }
         const filtered = filterCodeStructure(parsed, {
           file_filter,
           max_files,
