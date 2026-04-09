@@ -1,6 +1,6 @@
 {
   "name": "vslsp",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "C#, Rust, and TypeScript LSP Diagnostics and Code Structure Tool for AI Agents",
   "module": "vslsp.ts",
   "type": "module",
