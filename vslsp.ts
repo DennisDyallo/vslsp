@@ -5,6 +5,7 @@ import { query, status, notify } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CSHARP_MAPPER } from "./src/core/defaults";
 import { getMapper } from "./src/code-mapping/registry";
+import { setLogLevel } from "./src/core/logger";
 import { existsSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
 
@@ -94,6 +95,7 @@ interface CLIArgs {
   output: string;
   summary: boolean;
   help: boolean;
+  logLevel: string;
 }
 
 function parseArgs(): CLIArgs {
@@ -113,6 +115,7 @@ function parseArgs(): CLIArgs {
     output: "",
     summary: false,
     help: false,
+    logLevel: "",
   };
 
   // Check for command as first arg
@@ -178,6 +181,10 @@ function parseArgs(): CLIArgs {
         break;
       case "--summary":
         result.summary = true;
+        break;
+      case "--log-level":
+        result.logLevel = nextArg || "";
+        i++;
         break;
       case "--help":
       case "-h":
@@ -291,6 +298,14 @@ async function main() {
     case "serve":
       if (!args.solution) {
         error("--solution is required for serve command");
+      }
+      if (args.logLevel) {
+        const VALID = ["error", "warn", "info", "debug"] as const;
+        if (VALID.includes(args.logLevel as any)) {
+          setLogLevel(args.logLevel as "error" | "warn" | "info" | "debug");
+        } else {
+          error(`Invalid --log-level "${args.logLevel}". Valid: error, warn, info, debug`);
+        }
       }
       await serve({
         solution: args.solution,

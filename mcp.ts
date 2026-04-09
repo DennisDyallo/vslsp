@@ -170,11 +170,11 @@ function filterCodeStructure(
   return result;
 }
 
-/** Count Namespace members recursively. */
+/** Count Namespace/Mod members recursively (Rust uses "Mod" for modules). */
 function countNamespaces(members: any[]): number {
   let count = 0;
   for (const m of members) {
-    if (m.type === "Namespace") count++;
+    if (m.type === "Namespace" || m.type === "Mod") count++;
     if (m.children?.length) count += countNamespaces(m.children);
   }
   return count;
