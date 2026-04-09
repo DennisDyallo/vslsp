@@ -437,12 +437,11 @@ server.registerTool(
         "Language to analyze. Auto-detected from file extensions if omitted. " +
         "Auto-detection may silently return 0 files — pass explicitly for reliable results."
       ),
-      depth: z.enum(["types", "signatures", "full"]).optional().default("full").describe(
+      depth: z.enum(["types", "signatures", "full"]).optional().default("signatures").describe(
         "Output detail level. " +
         "'types': type names only, no methods — fits within 30KB AX budget. " +
-        "'signatures': types + method signatures, no nested children — fits within 200KB context window budget for most codebases. " +
-        "'full': complete recursive output (default) — use only for single files; on directories may exceed 1MB. " +
-        "Prefer 'signatures' for directory-level calls."
+        "'signatures': types + method signatures, no nested children — fits within 200KB context window budget (default). " +
+        "'full': complete recursive output — opt-in; use only for single files, on directories may exceed 1MB."
       ),
       file_filter: z.string().optional().describe(
         "Glob pattern to filter files (e.g. 'src/Core/**', '**/*.service.ts'). Applied before depth and max_files. " +
@@ -481,7 +480,7 @@ server.registerTool(
         const filtered = filterCodeStructure(parsed, {
           file_filter,
           max_files,
-          depth: depth ?? "full",
+          depth: depth ?? "signatures",
           autoDetected: !language,
         });
         return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };

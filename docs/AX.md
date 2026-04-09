@@ -12,7 +12,7 @@ A vslsp tool call must never return enough data to meaningfully pollute an agent
 | `depth: "signatures"` | < 200KB | Types + method signatures — usable for an overview call |
 | `file_filter` + `max_files: 5` | < 50KB | Focused subtree |
 | `severity: "error", limit: 20` | < 10KB | 20 errors fits comfortably in a response |
-| Unfiltered `depth: "full"` | > 200KB | Never appropriate for directory calls |
+| `depth: "full"` (opt-in) | > 200KB | Never appropriate for directory calls — use only for single files |
 
 AX_BUDGET_BYTES = 200,000 bytes (see mcp.ts). Responses exceeding this are auto-truncated with a warning.
 

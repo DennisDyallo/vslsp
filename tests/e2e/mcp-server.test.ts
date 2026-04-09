@@ -432,6 +432,7 @@ describe("get_code_structure via MCP", () => {
         path: join(PROJECT_ROOT, "src/core/types.ts"),
         format: "json",
         language: "typescript",
+        depth: "full", // explicitly request full — validates complete CodeMember schema including children
       },
     });
 
@@ -483,6 +484,7 @@ describe("get_code_structure via MCP", () => {
         path: join(PROJECT_ROOT, "tools/rust-mapper/src/main.rs"),
         format: "json",
         language: "rust",
+        depth: "full", // explicitly request full — validates complete CodeMember schema including children
       },
     });
 
@@ -671,8 +673,8 @@ describe("get_code_structure via MCP", () => {
       try {
         const result = await client.callTool({
           name: "get_code_structure",
-          arguments: { path: AX_TRUNC_DIR, language: "typescript" },
-          // No depth, no max_files — full output, AX truncation must fire
+          arguments: { path: AX_TRUNC_DIR, language: "typescript", depth: "full" },
+          // depth:'full' + no max_files — explicitly request maximum output so AX truncation must fire
         });
 
         expect(result.isError).toBeFalsy();

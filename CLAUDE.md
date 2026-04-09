@@ -171,7 +171,7 @@ get_code_structure(path, language?, depth?, file_filter?, max_files?, format?)
   path:        directory or single file — always pass language: for directories
   language:    "csharp" | "rust" | "typescript" — auto-detected if omitted
                WARNING: auto-detection may silently return 0 files; prefer explicit
-  depth:       "signatures" (recommended) | "types" | "full" (default)
+  depth:       "signatures" (default) | "types" | "full" (opt-in, single files only)
                "types"      — type names only, no methods (~50x smaller than full)
                "signatures" — types + method signatures, no children (~10x smaller)
                "full"       — complete recursive output (use only for single files)
