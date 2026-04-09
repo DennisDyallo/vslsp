@@ -1,7 +1,7 @@
 # Plan: Unified get_diagnostics + vslsp Integration Test Skill
 
-**Status: IN PROGRESS (Phase 2) — v1.5.0 output filtering shipped (889780e); AX contract tests pending**
-**Phase 1 (unification + detectLanguage fixes) and Phase 2 (filtering) complete. Phase 3 (contract tests) planned below.**
+**Status: COMPLETE — v1.5.1 released 2026-04-09. AX byte-budget truncation shipped (5278b3f), 9 contract tests in CI (37db623), 70 tests pass.**
+**All phases complete: P1 (unification), P2 (filtering), P3 (contract tests), P4 (AX auto-truncation). Verified against 3 real codebases.**
 
 ---
 
