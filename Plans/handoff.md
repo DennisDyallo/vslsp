@@ -2,26 +2,13 @@
 
 **Date:** 2026-04-09
 **Branch:** main
-**Last commit:** bc2c70a (pre-release) → v1.7.0 release pending
+**Last commit:** 95d2656 chore: release v1.7.0
 
 ---
 
 ## Session Summary
 
-This session was fully AX-driven. Starting from a clean v1.5.3 baseline, the session built and shipped two releases (v1.6.0 and v1.7.0) across four major workstreams:
-
-1. **v1.6.0** — Three parallel workstreams via isolated worktree agents:
-   - `docs/AX.md` — First-class AX constitution (goal, budgets, 5 principles, tool schema standards, error message standard, CI enforcement, extension checklist)
-   - `vslsp uninstall-mapper <lang>` — CLI gap closed; full install/uninstall symmetry
-   - `tests/http.test.ts` rewrite — 4 brittle source-text string matches → 16 real HTTP behavior tests
-
-2. **AX Audit Round 1** — Audited all 8 tool schemas against the constitution. Found 8 gaps (G1-G8). Fixed G1-G5, G7-G8 (schema/description improvements + file_filter 0-match runtime warning). Flipped G6 (`depth` default `"full"` → `"signatures"`) with tests explicitly requesting `"full"` where needed.
-
-3. **AX Audit Round 2 (background agent)** — Post-fix validation. Found 7 remaining gaps (F1-F7). `withDiagnosticsAxWarning` and `file_filter` 0-match warning had zero test coverage. `enrichError` missing. Single-file warning message weak. `get_diagnostics` param descriptions lacked 50KB threshold reference.
-
-4. **DevTeam Fix Loop** — Engineer+Reviewer loop implemented all 7 findings. Reviewer caught one gap (B5 conditional guard → made unconditional). All shipped.
-
-5. **v1.7.0** — Released with all of the above.
+This session was fully AX-driven across two releases. Starting from v1.5.3, the session produced v1.6.0 (AX constitution, `uninstall-mapper`, real HTTP behavior tests) and v1.7.0 (AX enforcement made rigorous: `depth` default flipped to `"signatures"`, `get_diagnostics` oversize warning, 13 AX ratchet tests, `enrichError` for agent-actionable OS errors). Two audit rounds and one DevTeam Engineer+Reviewer loop ensured every AX principle is now enforced at schema, runtime, and test levels.
 
 ---
 
@@ -30,6 +17,7 @@ This session was fully AX-driven. Starting from a clean v1.5.3 baseline, the ses
 ### Committed Work (this session)
 
 ```
+95d2656 chore: release v1.7.0
 bc2c70a test: strengthen B5 — unconditional size assert ensures warning path always executes
 0296bea test: AX ratchet tests B5/A3b/A4b/A5+; fix F3 enrichError, F4 single-file msg, F6 param descriptions
 771afc9 fix: AX warning for unfiltered get_diagnostics responses
@@ -43,51 +31,46 @@ d00a1ca feat: add vslsp uninstall-mapper command
 
 ### Uncommitted Changes
 
-None at session end. Working tree clean after release commit.
+None. Working tree clean. Only `.claude/` (untracked worktree metadata) appears in `git status`.
 
 ### Build & Test Status
 
 - TypeScript type check: **clean** (`bun run tsc --noEmit`)
-- Unit tests: **49 pass, 0 fail** (http ×16, types ×10, store ×8, mapper ×6, typescript ×5, rust ×4)
-- E2E tests: 70+ pass (AX contract tests A1-A6, B1-B5, plus schema and daemon tests)
-- RustMapper binary uninstalled during smoke test — reinstall with `vslsp install-mapper rust`
+- Unit tests: **49 pass, 0 fail**
+- E2E tests: 70+ pass including 13 AX ratchet tests
+- Released: **v1.7.0** — tagged and pushed, CI triggered
 
-### AX Ratchet Tests (locked in CI)
+### Worktree / Parallel Agent State
 
-| Test | What it locks |
-|------|--------------|
-| A1 | `depth:"types"` < 30KB AND non-empty |
-| A2 | `depth:"signatures"` < 200KB AND non-empty |
-| A3 | `file_filter` scopes to matching files only |
-| A3b | `file_filter` 0-match emits warning with pattern + guidance |
-| A4 | `max_files` caps file count and summary |
-| A4b | `max_files: 0` returns empty files with valid schema |
-| A5 | Auto-detect 0-files emits warning with `"typescript"`, `"rust"`, `"csharp"` |
-| A6 | AX byte-budget auto-truncation fires for oversized output |
-| B1 | `severity:"error"` returns errors only |
-| B2 | `limit` caps diagnostic count |
-| B3 | `severity` + `limit` combine correctly |
-| B4 | `severity:"error"` + `limit:20` < 10KB |
-| B5 | Unfiltered `get_diagnostics` > 50KB emits AX warning; absent when filtered |
+Two stale worktrees remain from this session's parallel W1/W2 agents — both fully merged into main:
+
+| Worktree | Branch | Last commit | Status |
+|----------|--------|-------------|--------|
+| `.claude/worktrees/agent-a53e50a8` | `worktree-agent-a53e50a8` | `e261cf3` docs: AX constitution | ✅ Merged — safe to prune |
+| `.claude/worktrees/agent-add47742` | `worktree-agent-add47742` | `d00a1ca` feat: uninstall-mapper | ✅ Merged — safe to prune |
+
+Prune with: `git worktree prune`
 
 ---
 
 ## Readiness Assessment
 
+**Target:** AI agents (Claude Code, Cursor, Windsurf) working on C#, Rust, or TypeScript codebases who need compilation diagnostics and code structure analysis via MCP — responses must never pollute the agent's context window.
+
 | Need | Status | Notes |
 |------|--------|-------|
-| AX philosophy documented | ✅ | `docs/AX.md` — canonical constitution |
-| Responses stay within context window | ✅ | Auto-truncation at 200KB + warnings |
-| `get_diagnostics` unfiltered warned | ✅ | `withDiagnosticsAxWarning` at 50KB threshold |
-| Default `depth` is AX-safe | ✅ | `"signatures"` default; `"full"` opt-in |
-| file_filter 0-match warned | ✅ | Agent-actionable message with pattern + example |
-| Tool schema AX-complete | ✅ | All size-affecting params mention budget/threshold |
-| Error messages agent-actionable | ✅ | `enrichError` + specific mapper/daemon messages |
-| Install/uninstall symmetry | ✅ | `vslsp install-mapper` + `vslsp uninstall-mapper` |
-| HTTP server properly tested | ✅ | 16 real behavior tests across all routes |
-| AX contracts in CI | ✅ | 13 ratchet tests (A1-A6, A3b, A4b, B1-B5) |
+| Get all compilation errors, scoped to errors only | ✅ Working | `get_diagnostics(severity:"error", limit:20)` → < 10KB |
+| Understand codebase structure without reading files | ✅ Working | `get_code_structure(depth:"signatures")` default; AX budget enforced |
+| Dry-run compile check before writing to disk (C#) | ✅ Working | `verify_changes` with daemon; `reverted: true` confirmed |
+| Responses never exceed context window budget | ✅ Working | Auto-truncation at 200KB with agent-actionable warning |
+| Warning when response would be too large | ✅ Working | `get_code_structure` truncates + warns; `get_diagnostics` warns at 50KB |
+| Install / uninstall mappers per language | ✅ Working | `vslsp install-mapper` + `vslsp uninstall-mapper` (new this session) |
+| AX contracts locked in CI — regressions caught | ✅ Working | 13 ratchet tests: A1-A6, A3b, A4b, B1-B5 (dual-bound: upper + lower) |
+| AX philosophy documented and queryable | ✅ Working | `docs/AX.md` — constitution, budgets, principles, extension checklist |
 
-**Overall:** ⭐ Complete — AX constitution fully enforced at schema, runtime, and test levels. v1.7.0 released.
+**Overall:** ⭐ **Complete** — all AX goals met, 13 ratchet tests in CI, two audit rounds converged to clean, v1.7.0 released.
+
+**Critical next step:** No critical items. Optional: Go mapper (pattern established), or `verify_changes` for Rust/TypeScript (requires persistent `cargo check`/`tsc` processes).
 
 ---
 
@@ -95,15 +78,15 @@ None at session end. Working tree clean after release commit.
 
 ### Optional / Future
 
-1. **Go mapper** — Pattern established. Add `GoMapper` to registry, CI matrix, `install.sh`. Carry forward from v1.5.3 handoff.
+1. **Go mapper** — Pattern established: add `GoMapper` to registry, CI matrix, `install.sh`. Carried forward since v1.5.3.
 
-2. **Rust/TS daemon** — `verify_changes` dry-run is C#-only. Would require persistent `cargo check`/`tsc` processes.
+2. **Rust/TypeScript daemon** — `verify_changes` dry-run is C#-only. Would require persistent `cargo check`/`tsc` processes.
 
-3. **`http.test.ts` integration with B5** — The B5 test creates a synthetic fixture. A future improvement could share fixture generation logic between A6 (code structure) and B5 (diagnostics) via a helper.
+3. **AX truncation for `get_diagnostics`** — Currently warns only at 50KB (no truncation). Could add hard cap at e.g. 100KB for parity with `get_code_structure`. Low priority — warning already fires.
 
-4. **AX truncation for `get_diagnostics`** — Currently warns only (no truncation). Could add hard truncation at e.g. 100KB similar to `get_code_structure` at 200KB. Low priority given warning already fires.
+4. **Update `Plans/federated-coalescing-lampson.md`** — Status header should reference v1.7.0.
 
-5. **Update `Plans/federated-coalescing-lampson.md`** — Status header should reflect v1.7.0.
+5. **Prune stale worktrees** — `git worktree prune` to clean up agent-a53e50a8 and agent-add47742.
 
 ---
 
@@ -113,9 +96,9 @@ None.
 
 **Known intentional keeps:**
 - `store.clear()` and `didClose()` — valid API surface, not dead code
-- Single-file oversize warns but doesn't truncate — by design (`depth:"full"` is opt-in)
-- `withDiagnosticsAxWarning` warns only (no truncation) — semantics preserved intentionally
-- RustMapper binary removed during smoke test this session — reinstall with `vslsp install-mapper rust`
+- Single-file oversize warns but doesn't truncate — `depth:"full"` is opt-in, warning guides agent to use `"signatures"`
+- `withDiagnosticsAxWarning` warns only (no truncation) — preserves full diagnostic semantics intentionally
+- **RustMapper binary removed** during smoke test this session — reinstall: `vslsp install-mapper rust`
 
 ---
 
@@ -124,15 +107,15 @@ None.
 | File | Purpose |
 |------|---------|
 | `docs/AX.md` | AX constitution — canonical agent experience philosophy |
-| `mcp.ts:99,107` | `AX_BUDGET_BYTES` (200KB) and `AX_DIAG_WARN_BYTES` (50KB) constants |
+| `mcp.ts:99,107` | `AX_BUDGET_BYTES` (200KB) and `AX_DIAG_WARN_BYTES` (50KB) |
 | `mcp.ts:102-187` | `filterCodeStructure()` — depth/glob/max_files + auto-truncation |
 | `mcp.ts:218-239` | `withDiagnosticsAxWarning()` — diagnostics oversize warning |
-| `mcp.ts:284-294` | `enrichError()` — agent-actionable OS error guidance |
+| `mcp.ts:284-294` | `enrichError()` — ENOENT/EACCES → agent-actionable guidance |
 | `mcp.ts:464` | `depth` default `"signatures"` (was `"full"` before this session) |
-| `tests/e2e/mcp-server.test.ts:339-381` | B5 — `withDiagnosticsAxWarning` ratchet test |
-| `tests/e2e/mcp-server.test.ts:631-644` | A3b — `file_filter` 0-match ratchet test |
-| `tests/e2e/mcp-server.test.ts:659-671` | A4b — `max_files: 0` schema test |
-| `tests/http.test.ts` | 16 real HTTP behavior tests (all routes) |
+| `tests/e2e/mcp-server.test.ts:339-381` | B5 — `withDiagnosticsAxWarning` ratchet (unconditional) |
+| `tests/e2e/mcp-server.test.ts:631-644` | A3b — `file_filter` 0-match warning ratchet |
+| `tests/e2e/mcp-server.test.ts:659-671` | A4b — `max_files: 0` schema conformance |
+| `tests/http.test.ts` | 16 real HTTP behavior tests (all 8 routes) |
 | `vslsp.ts` | CLI — `install-mapper` + `uninstall-mapper` |
 
 ---
@@ -146,18 +129,23 @@ cd /Users/Dennis.Dyall/Code/other/vslsp
 git log --oneline -5
 git status
 bun run tsc --noEmit          # clean
-bun test tests/http.test.ts tests/diagnostics/store.test.ts tests/core/types.test.ts tests/code-mapping/mapper.test.ts tests/diagnostics/rust.test.ts tests/diagnostics/typescript.test.ts --timeout 30000
+bun test tests/http.test.ts tests/diagnostics/store.test.ts tests/core/types.test.ts \
+  tests/code-mapping/mapper.test.ts tests/diagnostics/rust.test.ts \
+  tests/diagnostics/typescript.test.ts --timeout 30000
 
-# Current version: v1.7.0
+# Current version: v1.7.0 (released this session)
 # AX constitution: docs/AX.md
 # 13 AX ratchet tests in CI
 
-# RustMapper was removed — reinstall if needed:
-# vslsp install-mapper rust
+# RustMapper was removed during smoke testing — reinstall if needed:
+vslsp install-mapper rust
+
+# Clean up stale session worktrees:
+git worktree prune
 
 # To run a code audit:
 # invoke /CodeAudit
 
-# Integration test (validates all 8 tools against 3 real codebases)
+# Integration test (validates all 8 tools against 3 real codebases):
 # invoke /vslsp-integration skill
 ```
