@@ -106,6 +106,7 @@ function filterCodeStructure(
   let files: any[] = parsed.files ?? [];
 
   // Glob filter
+  const preFilterCount = files.length;
   if (opts.file_filter) {
     files = files.filter(f => matchGlob(f.filePath ?? "", opts.file_filter!));
   }
@@ -146,6 +147,14 @@ function filterCodeStructure(
   }
 
   const result = buildResult(files, opts.autoDetected);
+
+  // Warn when an explicit file_filter matched 0 files (distinct from auto-detect empty)
+  if (opts.file_filter && files.length === 0 && preFilterCount > 0) {
+    const msg =
+      `file_filter "${opts.file_filter}" matched 0 of ${preFilterCount} files. ` +
+      `Check the glob pattern — use 'src/**' for a subtree or '**/*.ts' for all TypeScript files.`;
+    result.warning = result.warning ? result.warning + " " + msg : msg;
+  }
 
   // Build AX warning — merge with any existing warning (e.g. auto-detection) instead of overwriting
   if (axTruncated) {
@@ -265,7 +274,9 @@ server.registerTool(
       "Returns the same DiagnosticsResult schema for all languages: file paths, line numbers, error codes, severity. " +
       "C#: runs OmniSharp against a .sln file. " +
       "Rust: runs cargo check against a Cargo.toml. " +
-      "TypeScript: runs tsc --noEmit against a tsconfig.json.",
+      "TypeScript: runs tsc --noEmit against a tsconfig.json. " +
+      "Use severity and limit to scope results — unfiltered responses on large codebases can return " +
+      "hundreds of diagnostics. Start with severity:'error', limit:20 for a focused first pass.",
     inputSchema: z.object({
       // === Provide exactly one (selects language): ===
       solution: z.string().optional().describe(
@@ -280,10 +291,12 @@ server.registerTool(
       // === Shared (all languages): ===
       file: z.string().optional().describe("Filter diagnostics to a single source file path."),
       severity: z.enum(["error", "warning", "info", "hint"]).optional().describe(
-        "Minimum severity to include. 'error' = errors only; 'warning' = errors + warnings; etc. Default: all."
+        "Minimum severity to include. 'error' = errors only; 'warning' = errors + warnings; etc. Default: all. " +
+        "Without this, large codebases may return hundreds of diagnostics — use 'error' to stay within the context window budget."
       ),
       limit: z.number().optional().describe(
-        "Maximum total diagnostics to return across all files. Use 20–50 for a quick overview."
+        "Maximum total diagnostics to return across all files. Use 20–50 for a quick overview. " +
+        "Without a limit, all matching diagnostics are returned; combine with severity:'error' for a focused response under 10KB."
       ),
       // === C#-only (ignored for Rust/TypeScript): ===
       timeout: z.number().optional().default(60000).describe("C# only. Max wait in ms for OmniSharp analysis."),
@@ -412,21 +425,32 @@ server.registerTool(
       "Supports C# (via Roslyn), Rust (via syn), and TypeScript (via TS Compiler API). " +
       "Language is auto-detected from file extensions; override with the language param. " +
       "Use this to understand a codebase without reading every file. " +
-      "Pair with verify_changes to validate proposed edits compile before writing to disk.",
+      "Pair with verify_changes to validate proposed edits compile before writing to disk. " +
+      "AX WARNING: calling on a directory without filters returns 3–5MB of JSON on real codebases, " +
+      "consuming your entire context window. Always pass depth:'signatures' and scope with " +
+      "file_filter or max_files. The 200KB context window budget is enforced automatically — " +
+      "oversized responses are truncated with a warning field.",
     inputSchema: {
       path: z.string().describe("Absolute path to directory or file to analyze"),
       format: z.enum(["text", "json", "yaml"]).optional().default("json").describe("Output format. Ignored when any filter param is set (always returns JSON)."),
-      language: z.enum(["csharp", "rust", "typescript"]).optional().describe("Language to analyze. Auto-detected from file extensions if omitted."),
+      language: z.enum(["csharp", "rust", "typescript"]).optional().describe(
+        "Language to analyze. Auto-detected from file extensions if omitted. " +
+        "Auto-detection may silently return 0 files — pass explicitly for reliable results."
+      ),
       depth: z.enum(["types", "signatures", "full"]).optional().default("full").describe(
-        "Output detail level. 'types': type names only (Class/Interface/Enum, no methods). " +
-        "'signatures': types + method signatures (no nested children). " +
-        "'full': complete recursive output (default). Use 'signatures' for large codebases."
+        "Output detail level. " +
+        "'types': type names only, no methods — fits within 30KB AX budget. " +
+        "'signatures': types + method signatures, no nested children — fits within 200KB context window budget for most codebases. " +
+        "'full': complete recursive output (default) — use only for single files; on directories may exceed 1MB. " +
+        "Prefer 'signatures' for directory-level calls."
       ),
       file_filter: z.string().optional().describe(
-        "Glob pattern to filter files (e.g. 'src/Core/**', '**/*.service.ts'). Applied before depth and max_files."
+        "Glob pattern to filter files (e.g. 'src/Core/**', '**/*.service.ts'). Applied before depth and max_files. " +
+        "Without this on large codebases, response may exceed the 200KB context window budget even with depth:'signatures'."
       ),
       max_files: z.number().optional().describe(
-        "Maximum number of files to return. Applied after file_filter. Use 10–20 for a focused overview."
+        "Maximum number of files to return. Applied after file_filter. Use 10–20 for a focused overview. " +
+        "If omitted and response exceeds 200KB, files are auto-truncated with a warning field."
       ),
     },
     annotations: {
