@@ -72,21 +72,31 @@ Paste this into your system prompt or CLAUDE.md:
 ```
 You have access to the vslsp MCP server. Use it as follows:
 
+Tool priority order (reach for these first):
+1. get_diagnostics_summary — quick error count before doing anything (C# only)
+2. verify_changes — dry-run compile check before writing to disk (C# only, requires daemon)
+3. get_diagnostics — errors after writing (all languages)
+4. get_code_structure — only when you need to understand unfamiliar code structure
+
 C# projects:
-- Call get_code_structure(path) on the project directory to understand types and layout before editing.
-- Before writing files, call start_daemon(solution) with the .sln path, poll get_daemon_status until ready is true, then use verify_changes to check that your edits compile. Only write to disk once verify_changes reports clean.
-- After writing, call notify_file_changed(file) for each changed file, then get_diagnostics to confirm clean.
+- Check error count first: get_diagnostics_summary({ solution, use_daemon: true })
+- Before writing: start_daemon(solution), poll get_daemon_status until ready, use verify_changes
+- After writing: notify_file_changed(file), then get_diagnostics({ solution, severity: "error", limit: 20 })
 
 Rust projects:
-- Call get_code_structure(path) on the crate directory to understand module and type layout.
-- After editing files, call get_diagnostics(manifest) with the path to Cargo.toml to check for errors.
+- After editing: get_diagnostics({ manifest: "/path/to/Cargo.toml", severity: "error" })
 
 TypeScript projects:
-- Call get_code_structure(path) on the project directory to understand classes, interfaces, and types.
-- After editing files, call get_diagnostics(project) with the path to tsconfig.json (or the directory containing it) to check for errors.
+- After editing: get_diagnostics({ project: "/path/to/tsconfig.json", severity: "error", limit: 20 })
 
-Prefer get_code_structure over reading individual source files when you need to understand what exists.
-All paths passed to vslsp tools must be absolute.
+For get_code_structure — always filter or output will be too large:
+- Always pass depth: "signatures" for directory paths (10x smaller than default)
+- Use file_filter: "src/Core/**" to scope to a subtree
+- Use max_files: 20 to cap results
+- Always pass language: explicitly — auto-detection may silently fall back to wrong language
+- depth: "full" is only safe on single files
+
+All paths must be absolute.
 ```
 
 ## How it works

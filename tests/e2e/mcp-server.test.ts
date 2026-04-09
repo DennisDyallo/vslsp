@@ -257,6 +257,68 @@ describe("get_diagnostics (TypeScript) via MCP", () => {
     const data = parseToolResult(result);
     expect(data.error).toContain("tsconfig.json not found");
   });
+
+  // ── AX Contract: severity + limit filtering must contain context bomb bloat ──
+
+  test("B1: severity 'error' returns only error-severity diagnostics", async () => {
+    const result = await client.callTool({
+      name: "get_diagnostics",
+      arguments: { project: FIXTURE_DIR, severity: "error" },
+    });
+
+    const data = parseToolResult(result);
+    expectDiagnosticsResultSchema(data);
+
+    expect(data.summary.warnings).toBe(0);
+    expect(data.summary.info).toBe(0);
+    expect(data.summary.hints).toBe(0);
+
+    for (const file of data.files) {
+      for (const diag of file.diagnostics) {
+        expect(diag.severity).toBe("error");
+      }
+    }
+  }, 30_000);
+
+  test("B2: limit caps total diagnostic count across all files", async () => {
+    const result = await client.callTool({
+      name: "get_diagnostics",
+      arguments: { project: FIXTURE_DIR, limit: 1 },
+    });
+
+    const data = parseToolResult(result);
+    expectDiagnosticsResultSchema(data);
+
+    const totalDiags = data.files.reduce((sum: number, f: any) => sum + f.diagnostics.length, 0);
+    expect(totalDiags).toBeLessThanOrEqual(1);
+  }, 30_000);
+
+  test("B3: severity + limit combine — first N errors only", async () => {
+    const result = await client.callTool({
+      name: "get_diagnostics",
+      arguments: { project: FIXTURE_DIR, severity: "error", limit: 2 },
+    });
+
+    const data = parseToolResult(result);
+    const totalDiags = data.files.reduce((sum: number, f: any) => sum + f.diagnostics.length, 0);
+
+    expect(totalDiags).toBeLessThanOrEqual(2);
+    for (const file of data.files) {
+      for (const diag of file.diagnostics) {
+        expect(diag.severity).toBe("error");
+      }
+    }
+  }, 30_000);
+
+  test("B4: severity 'error' + limit 20 response fits 10KB AX budget", async () => {
+    const result = await client.callTool({
+      name: "get_diagnostics",
+      arguments: { project: FIXTURE_DIR, severity: "error", limit: 20 },
+    });
+
+    const size = (result as any).content[0].text.length;
+    expect(size).toBeLessThan(10_000); // 20 errors must fit in 10KB
+  }, 30_000);
 });
 
 // --- Rust Diagnostics ---
@@ -458,6 +520,126 @@ describe("get_code_structure via MCP", () => {
     expect(result.isError).toBe(true);
     const data = parseToolResult(result);
     expect(data.error).toBeTruthy();
+  });
+
+  // ── AX Contract: output filtering must never pollute the agent context window ──
+
+  describe("output filtering — AX context window contract", () => {
+    // Temp dir with tsconfig.json but no .ts files — TSMapper detects it (manifest),
+    // runs, finds 0 files, which triggers the auto-detection warning field.
+    const EMPTY_TS_DIR = join(PROJECT_ROOT, "tests", "fixtures", "_empty_ts_autodetect_test");
+
+    beforeAll(() => {
+      mkdirSync(EMPTY_TS_DIR, { recursive: true });
+      writeFileSync(join(EMPTY_TS_DIR, "tsconfig.json"), JSON.stringify({ compilerOptions: {} }));
+      // Intentionally no .ts files — mapper returns summary.files === 0
+    });
+
+    afterAll(() => {
+      rmSync(EMPTY_TS_DIR, { recursive: true, force: true });
+    });
+
+    test("A1: depth 'types' is smaller than 'full' and fits 30KB AX budget", async () => {
+      if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
+
+      const full = await client.callTool({
+        name: "get_code_structure",
+        arguments: { path: PROJECT_ROOT, language: "typescript", depth: "full" },
+      });
+      const fullSize = (full as any).content[0].text.length;
+
+      const typed = await client.callTool({
+        name: "get_code_structure",
+        arguments: { path: PROJECT_ROOT, language: "typescript", depth: "types" },
+      });
+      const typesData = parseToolResult(typed);
+      const typesSize = (typed as any).content[0].text.length;
+
+      expect(typesSize).toBeLessThan(fullSize);           // filter reduces output
+      expect(typesSize).toBeLessThan(30_000);             // AX upper bound: 30KB
+      expect(typesData.files.length).toBeGreaterThan(0);  // lower bound: real data
+
+      // depth: "types" members must not have Method/Fn/Constructor children
+      const TYPE_KINDS = ["Class","Struct","Interface","Enum","Record","Mod","Trait","Namespace","Type"];
+      for (const file of typesData.files) {
+        for (const member of file.members ?? []) {
+          for (const child of member.children ?? []) {
+            expect(TYPE_KINDS).toContain(child.type);
+          }
+        }
+      }
+    }, 30_000);
+
+    test("A2: depth 'signatures' satisfies 200KB context window budget with real data", async () => {
+      if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
+
+      const rawResult = await client.callTool({
+        name: "get_code_structure",
+        arguments: { path: PROJECT_ROOT, language: "typescript", depth: "signatures" },
+      });
+      const size = (rawResult as any).content[0].text.length;
+      const data = parseToolResult(rawResult);
+
+      expect(size).toBeLessThan(200_000);                    // AX upper bound
+      expect(data.files.length).toBeGreaterThan(0);          // lower bound: real data
+      expect(data.summary.methods).toBeGreaterThan(0);       // has method signatures
+
+      // depth: "signatures" grandchildren must be stripped
+      for (const file of data.files) {
+        for (const member of file.members ?? []) {
+          for (const child of member.children ?? []) {
+            expect(child.children).toHaveLength(0);
+          }
+        }
+      }
+    }, 30_000);
+
+    test("A3: file_filter scopes results to matching files only", async () => {
+      if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
+
+      const result = await client.callTool({
+        name: "get_code_structure",
+        arguments: { path: PROJECT_ROOT, language: "typescript", file_filter: "src/**" },
+      });
+      const data = parseToolResult(result);
+
+      expect(data.files.length).toBeGreaterThan(0);
+      for (const file of data.files) {
+        // All returned file paths must contain '/src/' as a path segment
+        // (handles both 'src/foo.ts' at root and nested 'path/to/src/foo.ts')
+        expect(file.filePath).toMatch(/(?:^|\/)src\//);
+      }
+    }, 30_000);
+
+    test("A4: max_files caps returned file count and summary", async () => {
+      if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
+
+      const result = await client.callTool({
+        name: "get_code_structure",
+        arguments: { path: PROJECT_ROOT, language: "typescript", max_files: 2 },
+      });
+      const data = parseToolResult(result);
+
+      expect(data.files.length).toBeLessThanOrEqual(2);
+      expect(data.summary.files).toBeLessThanOrEqual(2);
+    }, 30_000);
+
+    test("A5: warning field emitted when auto-detection returns 0 files", async () => {
+      if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
+
+      const result = await client.callTool({
+        name: "get_code_structure",
+        arguments: { path: EMPTY_TS_DIR },  // NO language param; tsconfig.json makes TSMapper run but finds 0 files
+      });
+
+      expect(result.isError).toBeFalsy();
+      const data = parseToolResult(result);
+
+      expect(data.summary.files).toBe(0);
+      expect(data.warning).toBeDefined();
+      expect(data.warning).toContain("auto-detected");
+      expect(data.warning).toContain("language:");
+    }, 30_000);
   });
 });
 
