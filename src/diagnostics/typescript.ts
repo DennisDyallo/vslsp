@@ -32,13 +32,12 @@ export async function collectTsDiagnostics(
 
   // tsc outputs diagnostics to stdout in format:
   // path(line,col): severity TSXXXX: message
-  const output = stdout;
   const fileMap = new Map<string, DiagnosticEntry[]>();
 
   // Match: file(line,col): category TSXXXX: message
   const diagPattern = /^(.+?)\((\d+),(\d+)\):\s+(error|warning|message)\s+(TS\d+):\s+(.+)$/;
 
-  for (const line of output.split("\n")) {
+  for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
 

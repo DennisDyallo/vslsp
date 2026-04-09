@@ -1,5 +1,5 @@
-import { existsSync } from "fs";
-import { resolve, dirname } from "path";
+import { existsSync, watch, statSync, readdirSync } from "fs";
+import { resolve, dirname, join, basename } from "path";
 import { LSPClient } from "../core/lsp-client";
 import { DiagnosticsStore } from "./store";
 import { createHttpServer } from "./http";
@@ -80,9 +80,17 @@ export async function serve(options: ServeOptions): Promise<void> {
   const solutionDir = dirname(solutionPath);
   const recentlyChanged = new Map<string, number>(); // Debounce with timestamps
 
+  // Periodically prune stale debounce entries to prevent unbounded growth
+  const DEBOUNCE_CLEANUP_MS = 60_000;
+  const DEBOUNCE_STALE_MS = 5_000;
+  const debounceCleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, ts] of recentlyChanged) {
+      if (now - ts > DEBOUNCE_STALE_MS) recentlyChanged.delete(key);
+    }
+  }, DEBOUNCE_CLEANUP_MS);
+
   // Use fs.watch with recursive: true - works on Linux with Bun
-  const { watch, existsSync: fsExists, statSync } = require("fs");
-  const { join, dirname: pathDirname, basename } = require("path");
 
   console.error(`[vslsp] Setting up watcher on: ${solutionDir}`);
 
@@ -100,7 +108,7 @@ export async function serve(options: ServeOptions): Promise<void> {
       recentlyChanged.set(fullPath, now);
 
       // Check if file exists (events fire for deletes too)
-      if (!fsExists(fullPath)) return;
+      if (!existsSync(fullPath)) return;
 
       console.error(`[vslsp] File changed: ${fullPath}`);
       client.didSave(fullPath).catch((err) => {
@@ -112,14 +120,13 @@ export async function serve(options: ServeOptions): Promise<void> {
     // For rename events on non-.cs files (like sed temp files), check if any
     // .cs file in that directory was just modified (atomic write detection)
     if (event === "rename") {
-      const dir = join(solutionDir, pathDirname(relativePath));
+      const dir = join(solutionDir, dirname(relativePath));
       const tempBasename = basename(relativePath);
 
       // Only check if it looks like a temp file (sed uses sedXXXXXX pattern)
       if (tempBasename.startsWith("sed") || tempBasename.startsWith(".") || tempBasename.includes("~")) {
         // Find .cs files in this directory modified in last 2 seconds
         try {
-          const { readdirSync } = require("fs");
           const files = readdirSync(dir);
           const now = Date.now();
 
@@ -140,12 +147,12 @@ export async function serve(options: ServeOptions): Promise<void> {
                   console.error(`[vslsp] Error notifying change: ${err}`);
                 });
               }
-            } catch {
-              // Ignore stat errors
+            } catch (e) {
+              console.error(`[vslsp] stat error during atomic write detection: ${e}`);
             }
           }
-        } catch {
-          // Ignore readdir errors
+        } catch (e) {
+          console.error(`[vslsp] readdir error during atomic write detection: ${e}`);
         }
       }
     }
@@ -178,6 +185,7 @@ export async function serve(options: ServeOptions): Promise<void> {
   // Handle graceful shutdown
   const shutdown = async () => {
     console.error(`\n[vslsp] Shutting down...`);
+    clearInterval(debounceCleanup);
     watcher.close();
     server.stop();
     await client.stop();

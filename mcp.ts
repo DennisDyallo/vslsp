@@ -34,8 +34,13 @@ function err(message: string) {
 
 // ── Output filter helpers ──────────────────────────────────────────────────
 
+/** Kinds that count as "types" in the summary (excludes containers like Namespace/Mod/Impl). */
 const TYPE_MEMBER_KINDS = new Set([
-  "Class", "Struct", "Interface", "Enum", "Record", "Trait", "Impl", "Mod", "Namespace", "Type",
+  "Class", "Struct", "Interface", "Enum", "Record", "Trait", "Type",
+]);
+/** Kinds kept by depth: "types" — includes containers so their type children are preserved. */
+const TYPE_DEPTH_KINDS = new Set([
+  ...TYPE_MEMBER_KINDS, "Namespace", "Mod", "Impl",
 ]);
 const METHOD_MEMBER_KINDS = new Set(["Method", "Constructor", "Fn"]);
 
@@ -60,7 +65,7 @@ function applyDepth(members: any[], depth: string): any[] {
   if (depth === "types") {
     // Type names only — no methods, no children
     return members
-      .filter(m => TYPE_MEMBER_KINDS.has(m.type))
+      .filter(m => TYPE_DEPTH_KINDS.has(m.type))
       .map(m => ({ ...m, children: applyDepth(m.children ?? [], "types") }));
   }
   // depth === "signatures": all members, but grandchildren stripped

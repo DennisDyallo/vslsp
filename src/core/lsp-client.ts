@@ -4,20 +4,10 @@ import {
   StreamMessageReader,
   StreamMessageWriter,
   type MessageConnection,
-  ParameterStructures,
 } from "vscode-jsonrpc/node";
 import {
-  InitializeRequest,
-  InitializedNotification,
-  ShutdownRequest,
-  ExitNotification,
-  PublishDiagnosticsNotification,
   type InitializeParams,
   type PublishDiagnosticsParams,
-  DidOpenTextDocumentNotification,
-  DidChangeTextDocumentNotification,
-  DidSaveTextDocumentNotification,
-  DidCloseTextDocumentNotification,
 } from "vscode-languageserver-protocol";
 import type { LSPClientOptions } from "./types";
 import { readFileSync } from "fs";

@@ -119,7 +119,7 @@ function parseArgs(): CLIArgs {
 
   // Check for command as first arg
   const firstArg = args[0];
-  if (args.length > 0 && firstArg && !firstArg.startsWith("-")) {
+  if (firstArg && !firstArg.startsWith("-")) {
     if (firstArg === "serve" || firstArg === "query" || firstArg === "status" || firstArg === "notify" || firstArg === "map") {
       result.command = firstArg;
       args.shift();

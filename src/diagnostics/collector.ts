@@ -1,25 +1,21 @@
-import type { PublishDiagnosticsParams } from "vscode-languageserver-protocol";
 import { LSPClient } from "../core/lsp-client";
 import {
   type DiagnosticsResult,
-  type FileDiagnostics,
-  type DiagnosticSummary,
   type LSPClientOptions,
-  diagnosticToEntry,
 } from "../core/types";
-import { fileURLToPath } from "url";
 import { existsSync } from "fs";
 import { resolve } from "path";
+import { DiagnosticsStore } from "./store";
 
 export class DiagnosticsCollector {
   private client: LSPClient;
-  private diagnosticsMap: Map<string, FileDiagnostics> = new Map();
-  private lastUpdate: number = Date.now();
+  private store: DiagnosticsStore;
   private options: LSPClientOptions;
 
   constructor(options: LSPClientOptions) {
     this.options = options;
     this.client = new LSPClient(options);
+    this.store = new DiagnosticsStore(options.solutionPath);
   }
 
   async collect(): Promise<DiagnosticsResult> {
@@ -28,7 +24,7 @@ export class DiagnosticsCollector {
       throw new Error(`Solution file not found: ${solutionPath}`);
     }
 
-    this.client.onDiagnostics((params) => this.handleDiagnostics(params));
+    this.client.onDiagnostics((params) => this.store.handleDiagnostics(params));
 
     await this.client.start();
 
@@ -37,40 +33,17 @@ export class DiagnosticsCollector {
 
     await this.client.stop();
 
-    return this.buildResult();
-  }
-
-  private handleDiagnostics(params: PublishDiagnosticsParams): void {
-    this.lastUpdate = Date.now();
-
-    const uri = params.uri;
-    let path: string;
-    try {
-      path = fileURLToPath(uri);
-    } catch {
-      path = uri.replace(/^file:\/\//, "");
-    }
-
-    if (params.diagnostics.length === 0) {
-      // Clear diagnostics for this file
-      this.diagnosticsMap.delete(uri);
-    } else {
-      this.diagnosticsMap.set(uri, {
-        uri,
-        path,
-        diagnostics: params.diagnostics.map(diagnosticToEntry),
-      });
-    }
+    return this.store.getAll();
   }
 
   private async waitForCompletion(): Promise<void> {
     const startTime = Date.now();
     const MIN_WAIT = 10000; // Wait at least 10s for OmniSharp to load
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const checkInterval = setInterval(() => {
         const elapsed = Date.now() - startTime;
-        const timeSinceLastUpdate = Date.now() - this.lastUpdate;
+        const timeSinceLastUpdate = Date.now() - this.store.getLastUpdate();
 
         if (elapsed >= this.options.timeout) {
           clearInterval(checkInterval);
@@ -81,37 +54,5 @@ export class DiagnosticsCollector {
         }
       }, 100);
     });
-  }
-
-  private buildResult(): DiagnosticsResult {
-    const files = Array.from(this.diagnosticsMap.values())
-      .filter((f) => f.diagnostics.length > 0)
-      .sort((a, b) => a.path.localeCompare(b.path));
-
-    const summary: DiagnosticSummary = {
-      errors: 0,
-      warnings: 0,
-      info: 0,
-      hints: 0,
-    };
-
-    for (const file of files) {
-      for (const diag of file.diagnostics) {
-        switch (diag.severity) {
-          case "error": summary.errors++; break;
-          case "warning": summary.warnings++; break;
-          case "info": summary.info++; break;
-          case "hint": summary.hints++; break;
-        }
-      }
-    }
-
-    return {
-      solution: this.options.solutionPath,
-      timestamp: new Date().toISOString(),
-      summary,
-      clean: summary.errors === 0,
-      files,
-    };
   }
 }
