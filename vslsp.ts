@@ -5,8 +5,7 @@ import { query, status, notify } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CSHARP_MAPPER } from "./src/core/defaults";
 import { getMapper } from "./src/code-mapping/registry";
-import { existsSync } from "fs";
-import { mkdirSync } from "fs";
+import { existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
 // Embedded at build time via --define "VSLSP_VERSION=\"x.y.z\""
@@ -29,8 +28,9 @@ USAGE:
   # Code structure mapping
   vslsp map [path] [--format text|json|yaml] [--output dir]
 
-  # Install a code mapper
+  # Install / uninstall a code mapper
   vslsp install-mapper <lang>
+  vslsp uninstall-mapper <lang>
 
 COMMANDS:
   serve                 Start persistent daemon with HTTP API
@@ -39,6 +39,7 @@ COMMANDS:
   notify                Notify daemon of file change
   map                   Map code structure (C#, Rust, TypeScript) via AST analysis
   install-mapper        Install a code mapper (csharp | rust | typescript)
+  uninstall-mapper      Remove an installed mapper binary (csharp | rust | typescript)
 
 OPTIONS (one-shot mode):
   --solution <path>     Path to .sln file (required)
@@ -77,9 +78,12 @@ EXAMPLES:
   vslsp map .                          # Current dir, JSON format
   vslsp map ./src --format text        # Text tree format
   vslsp map . --format json --output ./docs
+
+  # Uninstall a mapper
+  vslsp uninstall-mapper rust
 `;
 
-type Command = "serve" | "query" | "status" | "notify" | "map" | "install-mapper" | "oneshot";
+type Command = "serve" | "query" | "status" | "notify" | "map" | "install-mapper" | "uninstall-mapper" | "oneshot";
 
 interface CLIArgs {
   command: Command;
@@ -125,6 +129,10 @@ function parseArgs(): CLIArgs {
       args.shift();
     } else if (firstArg === "install-mapper") {
       result.command = "install-mapper";
+      args.shift();
+      result.installLang = args[0] && !args[0].startsWith("-") ? args.shift()! : "";
+    } else if (firstArg === "uninstall-mapper") {
+      result.command = "uninstall-mapper";
       args.shift();
       result.installLang = args[0] && !args[0].startsWith("-") ? args.shift()! : "";
     }
@@ -240,6 +248,37 @@ async function installMapper(language: string): Promise<void> {
   console.log(`Installed: ${m.binaryPath}`);
 }
 
+async function uninstallMapper(language: string): Promise<void> {
+  const m = getMapper(language);
+  if (!m) {
+    console.error(`Unknown language: ${language}\nSupported: csharp, rust, typescript`);
+    process.exit(1);
+  }
+
+  const installDir = join(process.env.HOME || "~", ".local", "share", "vslsp", m.installDir);
+  let removed = false;
+
+  if (existsSync(installDir)) {
+    rmSync(installDir, { recursive: true, force: true });
+    console.log(`Removed: ${installDir}`);
+    removed = true;
+  }
+
+  // Legacy path for csharp: ~/.local/share/vslsp/code-mapper/
+  if (language === "csharp") {
+    const legacyDir = join(process.env.HOME || "~", ".local", "share", "vslsp", "code-mapper");
+    if (existsSync(legacyDir)) {
+      rmSync(legacyDir, { recursive: true, force: true });
+      console.log(`Removed: ${legacyDir}`);
+      removed = true;
+    }
+  }
+
+  if (!removed) {
+    console.log(`${language} mapper is not installed.`);
+  }
+}
+
 async function runOneShot(args: CLIArgs): Promise<void> {
   if (!args.solution) {
     error("--solution is required");
@@ -338,6 +377,14 @@ async function main() {
         error("Usage: vslsp install-mapper <lang>  (csharp | rust | typescript)");
       }
       await installMapper(args.installLang);
+      break;
+    }
+
+    case "uninstall-mapper": {
+      if (!args.installLang) {
+        error("Usage: vslsp uninstall-mapper <lang>  (csharp | rust | typescript)");
+      }
+      await uninstallMapper(args.installLang);
       break;
     }
 
