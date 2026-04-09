@@ -361,12 +361,12 @@ describe("get_diagnostics (TypeScript) via MCP", () => {
       const unfilteredData = parseToolResult(unfilteredResult);
       const unfilteredSize = (unfilteredResult as any).content[0].text.length;
 
-      if (unfilteredSize > 50_000) {
-        expect(unfilteredData.warning).toBeDefined();
-        expect(unfilteredData.warning).toContain("context window budget");
-        expect(unfilteredData.warning).toContain("severity");
-        expect(unfilteredData.warning).toContain("limit");
-      }
+      // 20 files × 15 errors × ~200 bytes/entry ≥ 50KB — fixture is sized to guarantee this
+      expect(unfilteredSize).toBeGreaterThan(50_000);
+      expect(unfilteredData.warning).toBeDefined();
+      expect(unfilteredData.warning).toContain("context window budget");
+      expect(unfilteredData.warning).toContain("severity");
+      expect(unfilteredData.warning).toContain("limit");
 
       // Filtered call — AX warning must be absent
       const filteredResult = await client.callTool({
