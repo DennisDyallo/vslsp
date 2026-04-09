@@ -435,11 +435,13 @@ server.registerTool(
   async ({ path, format, language, depth, file_filter, max_files }) => {
     try {
       const needsFilter = file_filter !== undefined || max_files !== undefined || (depth && depth !== "full");
-      // Always use JSON when filtering — the filter helpers operate on parsed JSON
+      // Always use JSON when filtering or when default format is JSON — AX budget
+      // enforcement requires parsing the output, so all JSON responses go through
+      // filterCodeStructure regardless of whether explicit filters are set.
       const effectiveFormat = needsFilter ? "json" : (format ?? "json");
       const result = await map({ path, format: effectiveFormat, language });
 
-      if (needsFilter) {
+      if (effectiveFormat === "json") {
         const parsed = JSON.parse(result.output);
         const filtered = filterCodeStructure(parsed, {
           file_filter,
@@ -448,21 +450,6 @@ server.registerTool(
           autoDetected: !language,
         });
         return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
-      }
-
-      // No filter: check for auto-detection silent failure (0 files, no explicit language)
-      if (!language && effectiveFormat === "json") {
-        try {
-          const parsed = JSON.parse(result.output);
-          if ((parsed.summary?.files ?? 0) === 0) {
-            parsed.warning =
-              "Language was auto-detected but 0 files were found. " +
-              "If this is a TypeScript, Rust, or C# project, pass language: \"typescript\", \"rust\", or \"csharp\" explicitly.";
-            return { content: [{ type: "text" as const, text: JSON.stringify(parsed, null, 2) }] };
-          }
-        } catch {
-          // Non-JSON format or parse error — return as-is
-        }
       }
 
       return { content: [{ type: "text" as const, text: result.output }] };

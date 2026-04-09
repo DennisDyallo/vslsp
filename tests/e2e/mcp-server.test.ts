@@ -637,6 +637,82 @@ describe("get_code_structure via MCP", () => {
       expect(data.summary.files).toBeLessThanOrEqual(2);
     }, 30_000);
 
+    test("A6: AX byte-budget auto-truncation fires for oversized output", async () => {
+      if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
+
+      // Generate a synthetic fixture large enough to exceed the 200KB AX budget.
+      // 60 files × 5 classes × 8 methods ≈ 300KB of AST JSON at full depth.
+      const AX_TRUNC_DIR = join(PROJECT_ROOT, "tests", "fixtures", "_ax_truncation_test");
+      mkdirSync(join(AX_TRUNC_DIR, "src"), { recursive: true });
+      writeFileSync(join(AX_TRUNC_DIR, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { strict: true, noEmit: true, target: "ES2020", module: "ES2020", moduleResolution: "bundler", skipLibCheck: true },
+        include: ["src"],
+      }));
+
+      const FILE_COUNT = 60;
+      for (let i = 0; i < FILE_COUNT; i++) {
+        const classes = Array.from({ length: 5 }, (_, j) => {
+          const methods = Array.from({ length: 8 }, (_, k) =>
+            `  /** Method doc for operation ${k} in class ${j} of module ${i} */\n` +
+            `  public method${k}(param${k}: string, extra${k}: number): boolean { return true; }`
+          ).join("\n");
+          return (
+            `/** Documentation for Module${i}Service${j} — handles domain logic */\n` +
+            `export class Module${i}Service${j} {\n` +
+            `  public readonly id${j}: string = "";\n` +
+            `  public count${j}: number = 0;\n` +
+            `  public active${j}: boolean = false;\n` +
+            `${methods}\n}`
+          );
+        }).join("\n\n");
+        writeFileSync(join(AX_TRUNC_DIR, "src", `module${i}.ts`), classes);
+      }
+
+      try {
+        const result = await client.callTool({
+          name: "get_code_structure",
+          arguments: { path: AX_TRUNC_DIR, language: "typescript" },
+          // No depth, no max_files — full output, AX truncation must fire
+        });
+
+        expect(result.isError).toBeFalsy();
+        const text = (result as any).content[0].text;
+        const data = JSON.parse(text);
+
+        // 1. Response fits within AX budget (with small tolerance for JSON variance)
+        expect(text.length).toBeLessThanOrEqual(210_000);
+
+        // 2. Truncation fired — warning field present with expected content
+        expect(data.warning).toBeDefined();
+        expect(data.warning).toContain("truncated");
+        expect(data.warning).toContain("context window budget");
+        expect(data.warning).toContain(String(FILE_COUNT)); // original count in warning
+
+        // 3. File count reduced — fewer files returned than generated
+        expect(data.files.length).toBeLessThan(FILE_COUNT);
+        expect(data.files.length).toBeGreaterThan(0); // not empty
+
+        // 4. Summary.files matches actual returned file count (recomputed after truncation)
+        expect(data.summary.files).toBe(data.files.length);
+
+        // 5. Summary type/method counts are consistent with returned files
+        let manualTypes = 0, manualMethods = 0;
+        function walk(members: any[]) {
+          for (const m of members) {
+            if (["Class", "Struct", "Interface", "Enum", "Record", "Trait", "Impl", "Mod", "Namespace", "Type"].includes(m.type)) manualTypes++;
+            if (["Method", "Constructor", "Fn"].includes(m.type)) manualMethods++;
+            if (m.children?.length) walk(m.children);
+          }
+        }
+        for (const file of data.files) walk(file.members ?? []);
+
+        expect(data.summary.types).toBe(manualTypes);
+        expect(data.summary.methods).toBe(manualMethods);
+      } finally {
+        rmSync(AX_TRUNC_DIR, { recursive: true, force: true });
+      }
+    }, 60_000);
+
     test("A5: warning field emitted when auto-detection returns 0 files", async () => {
       if (!existsSync(DEFAULT_TS_MAPPER)) { console.warn("TSMapper not installed, skipping"); return; }
 
