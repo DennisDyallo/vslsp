@@ -70,12 +70,20 @@ function applyDepth(members: any[], depth: string): any[] {
   }));
 }
 
-/** Match a file path against a glob pattern, handling both relative and absolute paths. */
+// Match a file path against a glob pattern.
+// Direct match handles relative paths (e.g. pattern "src/[star][star]" vs "src/core/types.ts").
+// Fallback with a **/ prefix is only applied for filename-only patterns (no "/" in pattern)
+// so that "*.ts" matches absolute paths.  Path-prefixed patterns like "src/**" are NOT
+// broadened -- otherwise they would incorrectly match "tests/fixtures/src/foo.ts".
 function matchGlob(filePath: string, pattern: string): boolean {
   const g1 = new Bun.Glob(pattern);
   if (g1.match(filePath)) return true;
-  const g2 = new Bun.Glob("**/" + pattern.replace(/^\*\*\//, ""));
-  return g2.match(filePath);
+  // Only apply **/ fallback for filename-only patterns (no path separators)
+  if (!pattern.includes("/")) {
+    const g2 = new Bun.Glob("**/" + pattern);
+    return g2.match(filePath);
+  }
+  return false;
 }
 
 /** Apply post-processing filters to a get_code_structure JSON result. */
@@ -89,9 +97,11 @@ function filterCodeStructure(
   if (opts.file_filter) {
     files = files.filter(f => matchGlob(f.filePath ?? "", opts.file_filter!));
   }
-  // Depth filter
+  // Depth filter — also prune files with no remaining members (avoids wasting max_files slots)
   if (opts.depth && opts.depth !== "full") {
-    files = files.map(f => ({ ...f, members: applyDepth(f.members ?? [], opts.depth!) }));
+    files = files
+      .map(f => ({ ...f, members: applyDepth(f.members ?? [], opts.depth!) }))
+      .filter(f => f.members.length > 0);
   }
   // Max files cap
   if (opts.max_files !== undefined) {
@@ -128,6 +138,7 @@ function filterDiagnostics(result: any, minSeverity?: string, limit?: number): a
 
   for (const file of result.files ?? []) {
     if (remaining <= 0) break;
+    // Side-effectful filter: decrements remaining to enforce cross-file limit
     const diags = (file.diagnostics ?? []).filter((d: any) => {
       if (remaining <= 0) return false;
       if ((SEVERITY_ORDER[d.severity] ?? 3) > maxLevel) return false;
@@ -150,8 +161,6 @@ function filterDiagnostics(result: any, minSeverity?: string, limit?: number): a
 
   return { ...result, summary, files: filteredFiles, clean: summary.errors === 0 };
 }
-
-// ── Concurrency guard for verify_changes ───────────────────────────────────
 
 // Concurrency guard for verify_changes — prevents parallel calls from corrupting daemon state
 let verifyLockChain: Promise<void> = Promise.resolve();

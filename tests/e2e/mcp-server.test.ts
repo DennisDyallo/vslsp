@@ -310,6 +310,20 @@ describe("get_diagnostics (TypeScript) via MCP", () => {
     }
   }, 30_000);
 
+  test("B-edge: limit 0 returns empty files array with correct schema", async () => {
+    const result = await client.callTool({
+      name: "get_diagnostics",
+      arguments: { project: FIXTURE_DIR, limit: 0 },
+    });
+
+    const data = parseToolResult(result);
+    expectDiagnosticsResultSchema(data);
+    expect(data.files).toHaveLength(0);
+    expect(data.summary.errors).toBe(0);
+    expect(data.summary.warnings).toBe(0);
+    expect(data.clean).toBe(true); // no errors in filtered view
+  }, 30_000);
+
   test("B4: severity 'error' + limit 20 response fits 10KB AX budget", async () => {
     const result = await client.callTool({
       name: "get_diagnostics",
@@ -605,9 +619,8 @@ describe("get_code_structure via MCP", () => {
 
       expect(data.files.length).toBeGreaterThan(0);
       for (const file of data.files) {
-        // All returned file paths must contain '/src/' as a path segment
-        // (handles both 'src/foo.ts' at root and nested 'path/to/src/foo.ts')
-        expect(file.filePath).toMatch(/(?:^|\/)src\//);
+        // Mapper returns relative paths; "src/**" only matches paths starting with "src/"
+        expect(file.filePath).toMatch(/^src\//);
       }
     }, 30_000);
 
