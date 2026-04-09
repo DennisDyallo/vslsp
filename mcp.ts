@@ -32,6 +32,127 @@ function err(message: string) {
   return { content: [{ type: "text" as const, text: JSON.stringify({ error: message }, null, 2) }], isError: true };
 }
 
+// ── Output filter helpers ──────────────────────────────────────────────────
+
+const TYPE_MEMBER_KINDS = new Set([
+  "Class", "Struct", "Interface", "Enum", "Record", "Trait", "Impl", "Mod", "Namespace", "Type",
+]);
+const METHOD_MEMBER_KINDS = new Set(["Method", "Constructor", "Fn"]);
+
+/** Recursively count types and methods in a members array. */
+function countMembers(members: any[]): { types: number; methods: number } {
+  let types = 0, methods = 0;
+  for (const m of members) {
+    if (TYPE_MEMBER_KINDS.has(m.type)) types++;
+    if (METHOD_MEMBER_KINDS.has(m.type)) methods++;
+    if (m.children?.length) {
+      const c = countMembers(m.children);
+      types += c.types;
+      methods += c.methods;
+    }
+  }
+  return { types, methods };
+}
+
+/** Strip member children according to depth level. */
+function applyDepth(members: any[], depth: string): any[] {
+  if (depth === "full") return members;
+  if (depth === "types") {
+    // Type names only — no methods, no children
+    return members
+      .filter(m => TYPE_MEMBER_KINDS.has(m.type))
+      .map(m => ({ ...m, children: applyDepth(m.children ?? [], "types") }));
+  }
+  // depth === "signatures": all members, but grandchildren stripped
+  return members.map(m => ({
+    ...m,
+    children: (m.children ?? []).map((c: any) => ({ ...c, children: [] })),
+  }));
+}
+
+/** Match a file path against a glob pattern, handling both relative and absolute paths. */
+function matchGlob(filePath: string, pattern: string): boolean {
+  const g1 = new Bun.Glob(pattern);
+  if (g1.match(filePath)) return true;
+  const g2 = new Bun.Glob("**/" + pattern.replace(/^\*\*\//, ""));
+  return g2.match(filePath);
+}
+
+/** Apply post-processing filters to a get_code_structure JSON result. */
+function filterCodeStructure(
+  parsed: any,
+  opts: { file_filter?: string; max_files?: number; depth?: string; autoDetected: boolean }
+): any {
+  let files: any[] = parsed.files ?? [];
+
+  // Glob filter
+  if (opts.file_filter) {
+    files = files.filter(f => matchGlob(f.filePath ?? "", opts.file_filter!));
+  }
+  // Depth filter
+  if (opts.depth && opts.depth !== "full") {
+    files = files.map(f => ({ ...f, members: applyDepth(f.members ?? [], opts.depth!) }));
+  }
+  // Max files cap
+  if (opts.max_files !== undefined) {
+    files = files.slice(0, opts.max_files);
+  }
+
+  // Recompute summary
+  const totalMembers = files.flatMap(f => f.members ?? []);
+  const { types, methods } = countMembers(totalMembers);
+  const summary = { files: files.length, namespaces: parsed.summary?.namespaces ?? 0, types, methods };
+
+  const result: any = { summary, files };
+
+  // Auto-detection warning: no explicit language and zero files returned
+  if (opts.autoDetected && files.length === 0) {
+    result.warning =
+      "Language was auto-detected but 0 files were found. " +
+      "If this is a TypeScript, Rust, or C# project, pass language: \"typescript\", \"rust\", or \"csharp\" explicitly.";
+  }
+
+  return result;
+}
+
+/** Severity ordering: lower = more severe. */
+const SEVERITY_ORDER: Record<string, number> = { error: 0, warning: 1, info: 2, hint: 3 };
+
+/** Filter a DiagnosticsResult by minimum severity and total limit. */
+function filterDiagnostics(result: any, minSeverity?: string, limit?: number): any {
+  if (!minSeverity && limit === undefined) return result;
+
+  const maxLevel = minSeverity !== undefined ? (SEVERITY_ORDER[minSeverity] ?? 3) : 3;
+  let remaining = limit ?? Infinity;
+  const filteredFiles = [];
+
+  for (const file of result.files ?? []) {
+    if (remaining <= 0) break;
+    const diags = (file.diagnostics ?? []).filter((d: any) => {
+      if (remaining <= 0) return false;
+      if ((SEVERITY_ORDER[d.severity] ?? 3) > maxLevel) return false;
+      remaining--;
+      return true;
+    });
+    if (diags.length > 0) filteredFiles.push({ ...file, diagnostics: diags });
+  }
+
+  // Recompute summary
+  const summary = { errors: 0, warnings: 0, info: 0, hints: 0 };
+  for (const file of filteredFiles) {
+    for (const d of file.diagnostics) {
+      if (d.severity === "error") summary.errors++;
+      else if (d.severity === "warning") summary.warnings++;
+      else if (d.severity === "info") summary.info++;
+      else if (d.severity === "hint") summary.hints++;
+    }
+  }
+
+  return { ...result, summary, files: filteredFiles, clean: summary.errors === 0 };
+}
+
+// ── Concurrency guard for verify_changes ───────────────────────────────────
+
 // Concurrency guard for verify_changes — prevents parallel calls from corrupting daemon state
 let verifyLockChain: Promise<void> = Promise.resolve();
 function acquireVerifyLock(): Promise<() => void> {
@@ -70,8 +191,14 @@ server.registerTool(
       project: z.string().optional().describe(
         "TypeScript: path to tsconfig.json or directory containing one. Provide this OR solution OR manifest."
       ),
-      // === Shared: ===
+      // === Shared (all languages): ===
       file: z.string().optional().describe("Filter diagnostics to a single source file path."),
+      severity: z.enum(["error", "warning", "info", "hint"]).optional().describe(
+        "Minimum severity to include. 'error' = errors only; 'warning' = errors + warnings; etc. Default: all."
+      ),
+      limit: z.number().optional().describe(
+        "Maximum total diagnostics to return across all files. Use 20–50 for a quick overview."
+      ),
       // === C#-only (ignored for Rust/TypeScript): ===
       timeout: z.number().optional().default(60000).describe("C# only. Max wait in ms for OmniSharp analysis."),
       quiet_period: z.number().optional().default(5000).describe("C# only. Wait after last diagnostic before analysis is complete."),
@@ -92,27 +219,28 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ solution, manifest, project, file, timeout, quiet_period, use_daemon, port, package: rustPackage, all_targets }) => {
+  async ({ solution, manifest, project, file, severity, limit, timeout, quiet_period, use_daemon, port, package: rustPackage, all_targets }) => {
     try {
       // --- Rust ---
       if (manifest) {
-        const result = await collectRustDiagnostics({ manifest, package: rustPackage, file, allTargets: all_targets });
+        const raw = await collectRustDiagnostics({ manifest, package: rustPackage, file, allTargets: all_targets });
+        const result = filterDiagnostics(raw, severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
       // --- TypeScript ---
       if (project) {
-        const result = await collectTsDiagnostics({ project, file });
+        const raw = await collectTsDiagnostics({ project, file });
+        const result = filterDiagnostics(raw, severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
       // --- C# ---
       log("info", "get_diagnostics", { solution, use_daemon, file });
       if (use_daemon) {
-        const result = await query({ port, file, summary: false });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result.data, null, 2) }],
-        };
+        const raw = await query({ port, file, summary: false });
+        const result = filterDiagnostics(raw.data, severity, limit);
+        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
       const collector = new DiagnosticsCollector({
@@ -122,7 +250,7 @@ server.registerTool(
         quietPeriod: quiet_period,
       });
 
-      const result = await collector.collect();
+      let result = await collector.collect();
 
       if (file) {
         result.files = result.files.filter((f) => matchFilePath(f.path, file));
@@ -130,9 +258,8 @@ server.registerTool(
         result.clean = result.summary.errors === 0;
       }
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-      };
+      const filtered = filterDiagnostics(result, severity, limit);
+      return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
     } catch (e) {
       log("error", "tool error", { tool: "get_diagnostics", message: e instanceof Error ? e.message : String(e) });
       return err(e instanceof Error ? e.message : String(e));
@@ -202,8 +329,19 @@ server.registerTool(
       "Pair with verify_changes to validate proposed edits compile before writing to disk.",
     inputSchema: {
       path: z.string().describe("Absolute path to directory or file to analyze"),
-      format: z.enum(["text", "json", "yaml"]).optional().default("json").describe("Output format"),
+      format: z.enum(["text", "json", "yaml"]).optional().default("json").describe("Output format. Ignored when any filter param is set (always returns JSON)."),
       language: z.enum(["csharp", "rust", "typescript"]).optional().describe("Language to analyze. Auto-detected from file extensions if omitted."),
+      depth: z.enum(["types", "signatures", "full"]).optional().default("full").describe(
+        "Output detail level. 'types': type names only (Class/Interface/Enum, no methods). " +
+        "'signatures': types + method signatures (no nested children). " +
+        "'full': complete recursive output (default). Use 'signatures' for large codebases."
+      ),
+      file_filter: z.string().optional().describe(
+        "Glob pattern to filter files (e.g. 'src/Core/**', '**/*.service.ts'). Applied before depth and max_files."
+      ),
+      max_files: z.number().optional().describe(
+        "Maximum number of files to return. Applied after file_filter. Use 10–20 for a focused overview."
+      ),
     },
     annotations: {
       title: "Get Code Structure",
@@ -213,12 +351,40 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ path, format, language }) => {
+  async ({ path, format, language, depth, file_filter, max_files }) => {
     try {
-      const result = await map({ path, format, language });
-      return {
-        content: [{ type: "text" as const, text: result.output }],
-      };
+      const needsFilter = file_filter !== undefined || max_files !== undefined || (depth && depth !== "full");
+      // Always use JSON when filtering — the filter helpers operate on parsed JSON
+      const effectiveFormat = needsFilter ? "json" : (format ?? "json");
+      const result = await map({ path, format: effectiveFormat, language });
+
+      if (needsFilter) {
+        const parsed = JSON.parse(result.output);
+        const filtered = filterCodeStructure(parsed, {
+          file_filter,
+          max_files,
+          depth: depth ?? "full",
+          autoDetected: !language,
+        });
+        return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
+      }
+
+      // No filter: check for auto-detection silent failure (0 files, no explicit language)
+      if (!language && effectiveFormat === "json") {
+        try {
+          const parsed = JSON.parse(result.output);
+          if ((parsed.summary?.files ?? 0) === 0) {
+            parsed.warning =
+              "Language was auto-detected but 0 files were found. " +
+              "If this is a TypeScript, Rust, or C# project, pass language: \"typescript\", \"rust\", or \"csharp\" explicitly.";
+            return { content: [{ type: "text" as const, text: JSON.stringify(parsed, null, 2) }] };
+          }
+        } catch {
+          // Non-JSON format or parse error — return as-is
+        }
+      }
+
+      return { content: [{ type: "text" as const, text: result.output }] };
     } catch (e) {
       return err(e instanceof Error ? e.message : String(e));
     }

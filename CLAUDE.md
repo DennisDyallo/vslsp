@@ -1,30 +1,41 @@
 # vslsp — Agent Reference
 
-MCP server version: **1.4.0** | Tools: **8** | Languages: C#, Rust, TypeScript
+MCP server version: **1.5.0** | Tools: **8** | Languages: C#, Rust, TypeScript
 
 ---
 
 ## Agent Quick-Start
 
-### Step 1 — understand what's in the codebase
+### Step 1 — check for errors first
 
-Always start here. `get_code_structure` replaces reading individual source files.
+Before reading code, check if the project has existing errors. For C#:
 
 ```
-get_code_structure({ path: "/path/to/project" })
+get_diagnostics_summary({ solution: "/abs/path/Project.sln", use_daemon: true })
+→ { errors: N, warnings: N, ... }   ← small, fast, tells you whether to worry
 ```
 
-Returns every class, struct, interface, method, property, field, enum variant with signatures, line numbers, visibility, base types, and doc comments. Language is auto-detected from file extensions; pass `language: "csharp" | "rust" | "typescript"` to override.
+For Rust/TypeScript, `get_diagnostics` IS the summary (already compact when clean).
 
-### Step 2 — check if your changes compile
-
-Pick the workflow for the language you're editing:
+### Step 2 — check if your changes compile (C# only: use verify_changes)
 
 | Language | Pre-write check | Post-write check |
 |----------|----------------|-----------------|
-| **C#** | `verify_changes` (daemon required) | `get_diagnostics({ solution })` |
-| **Rust** | — (no dry-run) | `get_diagnostics({ manifest })` |
-| **TypeScript** | — (no dry-run) | `get_diagnostics({ project })` |
+| **C#** | `verify_changes` (daemon required) | `get_diagnostics({ solution, severity: "error", limit: 20 })` |
+| **Rust** | — (no dry-run) | `get_diagnostics({ manifest, severity: "error" })` |
+| **TypeScript** | — (no dry-run) | `get_diagnostics({ project, severity: "error" })` |
+
+### Step 3 — understand unfamiliar code (use sparingly, always filter)
+
+`get_code_structure` returns full AST output — filter it or it will be enormous.
+
+```
+get_code_structure({ path: "/path/to/project", depth: "signatures", max_files: 20 })
+```
+
+Use `depth: "signatures"` (types + method names, ~10x smaller than `full`).
+Use `file_filter: "src/Core/**"` to scope to a subtree.
+Always pass `language:` explicitly for directories — auto-detection can fall back silently.
 
 ---
 
@@ -118,51 +129,51 @@ This downloads only that one binary for the current platform and version. Nothin
 ### Diagnostics (all languages)
 
 ```
-get_diagnostics(solution | manifest | project, file?, ...)
+get_diagnostics(solution | manifest | project, file?, severity?, limit?, ...)
   → DiagnosticsResult
   Provide exactly one of:
     solution: C# — absolute path to .sln file
     manifest: Rust — path to Cargo.toml or directory containing one
     project:  TypeScript — path to tsconfig.json or directory containing one
-  file: filter results to a single source file (all languages)
+  file:     filter to a single source file (all languages)
+  severity: "error" | "warning" | "info" | "hint" — minimum severity to include
+            "error" = errors only; "warning" = errors + warnings; default: all
+  limit:    max total diagnostics to return (e.g. 20). Applied after severity filter.
 
-  C#-only params: timeout?, quiet_period?, use_daemon?, port?
-    use_daemon: true = query running daemon instead of spawning OmniSharp fresh
-  Rust-only params: package?, all_targets?
-    package: workspace member name; all_targets: include tests/benches
+  C#-only: timeout?, quiet_period?, use_daemon?, port?
+  Rust-only: package?, all_targets?
 
 get_diagnostics_summary(solution, use_daemon?, port?)
   → { errors, warnings, info, hints }
-  C# only. Use this first to check for errors before pulling full detail.
+  C# only. Call this first — tiny response, tells you whether to run full diagnostics.
 
-start_daemon(solution, port?)
-  → { status, port, solution, ready }
-
-get_daemon_status(port?)
-  → { status, ready, updateCount, solution }
-  Poll this after start_daemon. ready: true means verify_changes is safe to call.
-
-stop_daemon(port?)
-  → { status, port }
+start_daemon(solution, port?)        → { status, port, solution, ready }
+get_daemon_status(port?)             → { status, ready, updateCount, solution }
+stop_daemon(port?)                   → { status, port }
 
 notify_file_changed(file, content?, port?)
-  → { ok, file }
-  content: string = in-memory update; omit to read from disk
+  → { ok, file }   content = in-memory update; omit to read from disk
 
 verify_changes(changes[{file, content}], settle_ms?, timeout_ms?, port?)
   → DiagnosticsResult + { verified_files, reverted: true }
-  REQUIRES: running daemon with ready: true
-  Changes are applied in-memory and reverted — disk is never written.
+  REQUIRES: running daemon with ready: true. Disk is never written.
 ```
 
 ### Code Structure
 
 ```
-get_code_structure(path, format?, language?)
-  → { output: string }  — JSON by default
-  path: directory or single file
-  format: "json" (default) | "text" | "yaml"
-  language: "csharp" | "rust" | "typescript" — auto-detected from extensions if omitted
+get_code_structure(path, language?, depth?, file_filter?, max_files?, format?)
+  → { summary, files, warning? }
+  path:        directory or single file — always pass language: for directories
+  language:    "csharp" | "rust" | "typescript" — auto-detected if omitted
+               WARNING: auto-detection may silently return 0 files; prefer explicit
+  depth:       "signatures" (recommended) | "types" | "full" (default)
+               "types"      — type names only, no methods (~50x smaller than full)
+               "signatures" — types + method signatures, no children (~10x smaller)
+               "full"       — complete recursive output (use only for single files)
+  file_filter: glob pattern — e.g. "src/Core/**", "**/*.service.ts"
+  max_files:   cap results at N files — use 10–20 for an overview
+  format:      "json" (default) | "text" | "yaml" — ignored when filters are set
 ```
 
 ---
