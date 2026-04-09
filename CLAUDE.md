@@ -37,6 +37,10 @@ Use `depth: "signatures"` (types + method names, ~10x smaller than `full`).
 Use `file_filter: "src/Core/**"` to scope to a subtree.
 Always pass `language:` explicitly for directories — auto-detection can fall back silently.
 
+### AX Philosophy
+
+All tool responses are designed to fit within an agent's context window. See `docs/AX.md` for the complete AX constitution, budget thresholds, and extension checklist.
+
 ---
 
 ## C# Workflow (Full)
