@@ -32,6 +32,9 @@ USAGE:
   vslsp install-mapper <lang>
   vslsp uninstall-mapper <lang>
 
+  # Version
+  vslsp --version
+
 COMMANDS:
   serve                 Start persistent daemon with HTTP API
   query                 Query diagnostics from running daemon
@@ -40,6 +43,7 @@ COMMANDS:
   map                   Map code structure (C#, Rust, TypeScript) via AST analysis
   install-mapper        Install a code mapper (csharp | rust | typescript)
   uninstall-mapper      Remove an installed mapper binary (csharp | rust | typescript)
+  --version             Print installed version and exit
 
 OPTIONS (one-shot mode):
   --solution <path>     Path to .sln file (required)
@@ -331,6 +335,12 @@ async function main() {
 
   if (args.help) {
     console.log(HELP);
+    process.exit(0);
+  }
+
+  // --version: print installed version and exit
+  if (process.argv.includes("--version") || process.argv.includes("-v")) {
+    console.log(typeof VSLSP_VERSION !== "undefined" ? VSLSP_VERSION : "dev");
     process.exit(0);
   }
 
