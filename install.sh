@@ -18,6 +18,17 @@ info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
+# On macOS 15+ (Sequoia) Gatekeeper rejects Bun-compiled binaries that carry a
+# stale embedded signature, even after quarantine removal. Strip and re-sign ad-hoc.
+macos_sign() {
+    local binary="$1"
+    xattr -dr com.apple.quarantine "$binary" 2>/dev/null || true
+    if command -v codesign &>/dev/null; then
+        codesign --remove-signature "$binary" 2>/dev/null || true
+        codesign --force --sign - "$binary" 2>/dev/null || true
+    fi
+}
+
 # Parse installer flags
 MAPPERS=""
 YES=false
@@ -100,9 +111,7 @@ download_vslsp() {
     mkdir -p "$INSTALL_DIR"
     download "$url" "$INSTALL_DIR/vslsp"
     chmod +x "$INSTALL_DIR/vslsp"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        xattr -dr com.apple.quarantine "$INSTALL_DIR/vslsp" 2>/dev/null || true
-    fi
+    [[ "$(uname -s)" == "Darwin" ]] && macos_sign "$INSTALL_DIR/vslsp"
     info "vslsp binary installed to $INSTALL_DIR/vslsp"
 }
 
@@ -116,9 +125,7 @@ download_vslsp_mcp() {
     mkdir -p "$INSTALL_DIR"
     download "$url" "$INSTALL_DIR/vslsp-mcp"
     chmod +x "$INSTALL_DIR/vslsp-mcp"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        xattr -dr com.apple.quarantine "$INSTALL_DIR/vslsp-mcp" 2>/dev/null || true
-    fi
+    [[ "$(uname -s)" == "Darwin" ]] && macos_sign "$INSTALL_DIR/vslsp-mcp"
     info "vslsp-mcp binary installed to $INSTALL_DIR/vslsp-mcp"
 }
 
@@ -153,9 +160,7 @@ download_omnisharp() {
     rm -f "$tmp_archive"
 
     chmod +x "$omnisharp_dir/OmniSharp"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        xattr -dr com.apple.quarantine "$omnisharp_dir/OmniSharp" 2>/dev/null || true
-    fi
+    [[ "$(uname -s)" == "Darwin" ]] && macos_sign "$omnisharp_dir/OmniSharp"
     info "OmniSharp installed to $omnisharp_dir/OmniSharp"
 }
 
@@ -170,9 +175,7 @@ download_csharp_mapper() {
     mkdir -p "$csharp_mapper_dir"
     download "$url" "$csharp_mapper_dir/CSharpMapper"
     chmod +x "$csharp_mapper_dir/CSharpMapper"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        xattr -dr com.apple.quarantine "$csharp_mapper_dir/CSharpMapper" 2>/dev/null || true
-    fi
+    [[ "$(uname -s)" == "Darwin" ]] && macos_sign "$csharp_mapper_dir/CSharpMapper"
     info "CSharpMapper installed to $csharp_mapper_dir/CSharpMapper"
 }
 
@@ -186,9 +189,7 @@ download_rust_mapper() {
     mkdir -p "$rust_mapper_dir"
     download "$url" "$rust_mapper_dir/RustMapper"
     chmod +x "$rust_mapper_dir/RustMapper"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        xattr -dr com.apple.quarantine "$rust_mapper_dir/RustMapper" 2>/dev/null || true
-    fi
+    [[ "$(uname -s)" == "Darwin" ]] && macos_sign "$rust_mapper_dir/RustMapper"
     info "RustMapper installed to $rust_mapper_dir/RustMapper"
 }
 
@@ -202,9 +203,7 @@ download_ts_mapper() {
     mkdir -p "$ts_mapper_dir"
     download "$url" "$ts_mapper_dir/TSMapper"
     chmod +x "$ts_mapper_dir/TSMapper"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        xattr -dr com.apple.quarantine "$ts_mapper_dir/TSMapper" 2>/dev/null || true
-    fi
+    [[ "$(uname -s)" == "Darwin" ]] && macos_sign "$ts_mapper_dir/TSMapper"
     info "TSMapper installed to $ts_mapper_dir/TSMapper"
 }
 
