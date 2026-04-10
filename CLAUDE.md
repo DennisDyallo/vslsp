@@ -1,6 +1,6 @@
 # vslsp — Agent Reference
 
-MCP server version: **1.7.5** | Tools: **8** | Languages: C#, Rust, TypeScript
+MCP server version: **1.8.0** | Tools: **10** | Languages: C#, Rust, TypeScript
 
 ---
 
@@ -166,7 +166,7 @@ verify_changes(changes[{file, content}], settle_ms?, timeout_ms?, port?)
 ### Code Structure
 
 ```
-get_code_structure(path, language?, depth?, file_filter?, max_files?, format?)
+get_code_structure(path, language?, depth?, file_filter?, max_files?, format?, visibility?)
   → { summary, files, warning? }
   path:        directory or single file — always pass language: for directories
   language:    "csharp" | "rust" | "typescript" — auto-detected if omitted
@@ -178,6 +178,27 @@ get_code_structure(path, language?, depth?, file_filter?, max_files?, format?)
   file_filter: glob pattern — e.g. "src/Core/**", "**/*.service.ts"
   max_files:   cap results at N files — use 10–20 for an overview
   format:      "json" (default) | "text" | "yaml" — ignored when filters are set
+  visibility:  "public" (default) | "all" — C# only
+               "public"  — public/internal members only (API surface)
+               "all"     — includes private/protected — use for debugging internal classes
+```
+
+### Navigation (C# only — requires running daemon)
+
+```
+find_symbol(query, kind?, limit?, port?)
+  → { symbols: [{ name, kind, file, line, column, containerName? }], count }
+  query:  symbol name or partial name to search for
+  kind:   "class" | "method" | "interface" | "field" | "property" | "enum" | "struct" | "all"
+  limit:  max results (default: 50)
+  REQUIRES: running daemon (call start_daemon first, poll until ready)
+
+find_usages(file?, line?, column?, symbol?, port?)
+  → { definition?: { file, line, column }, usages: [{ file, line, column }], count }
+  Provide either:
+    file + line + column — precise lookup
+    symbol              — convenience; resolves via find_symbol first
+  REQUIRES: running daemon (call start_daemon first, poll until ready)
 ```
 
 ---
@@ -305,7 +326,7 @@ bun build --compile tools/ts-mapper/main.ts --outfile TSMapper
 ## Verify Correctness (Dev)
 
 ```bash
-# Tool count (must be 8)
+# Tool count (must be 10)
 grep -c "registerTool" mcp.ts
 
 # TypeScript clean

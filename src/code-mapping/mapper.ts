@@ -10,6 +10,7 @@ export interface MapOptions {
   output?: string;
   codeMapperPath?: string;
   language?: string;
+  visibility?: "all" | "public";
 }
 
 export interface MapResult {
@@ -54,6 +55,13 @@ export async function map(options: MapOptions): Promise<MapResult> {
     args.push("--output", resolve(options.output));
   } else {
     args.push("--stdout");
+  }
+  // --visibility is only supported by CSharpMapper; Rust/TS mappers would
+  // misinterpret the value as a positional path argument. Only pass for C#,
+  // and only when non-default ("public" is the mapper's built-in default).
+  const lang = options.language ?? detectLanguage(options.path)?.language;
+  if (options.visibility === "all" && lang === "csharp") {
+    args.push("--visibility", "all");
   }
 
   const proc = Bun.spawn([binaryPath, ...args], {

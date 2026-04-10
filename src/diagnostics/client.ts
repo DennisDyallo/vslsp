@@ -1,5 +1,6 @@
 import { existsSync } from "fs";
 import { resolve } from "path";
+import type { SymbolResult, UsageLocation } from "../core/types";
 
 export interface QueryOptions {
   port: number;
@@ -138,6 +139,59 @@ export async function notify(options: NotifyOptions): Promise<NotifyResult> {
     return await response.json() as NotifyResult;
   } catch (err) {
     if (isConnectionError(err)) connectionError(options.port);
+    throw err;
+  }
+}
+
+// ── Symbol search & references ───────────────────────────────────────────
+
+export interface FindSymbolResult {
+  symbols: SymbolResult[];
+  count: number;
+}
+
+export async function findSymbol(port: number, query: string, kind?: string, limit?: number): Promise<FindSymbolResult> {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const params = new URLSearchParams({ query });
+  if (kind) params.set("kind", kind);
+  if (limit) params.set("limit", String(limit));
+
+  try {
+    const response = await fetch(`${baseUrl}/symbol?${params}`);
+    if (!response.ok) {
+      const error = await response.json() as { error: string };
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+    return await response.json() as FindSymbolResult;
+  } catch (err) {
+    if (isConnectionError(err)) connectionError(port);
+    throw err;
+  }
+}
+
+export interface FindUsagesResult {
+  definition?: UsageLocation;
+  usages: UsageLocation[];
+  count: number;
+}
+
+export async function findUsages(port: number, file: string, line: number, column: number): Promise<FindUsagesResult> {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const params = new URLSearchParams({
+    file,
+    line: String(line),
+    column: String(column),
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/references?${params}`);
+    if (!response.ok) {
+      const error = await response.json() as { error: string };
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+    return await response.json() as FindUsagesResult;
+  } catch (err) {
+    if (isConnectionError(err)) connectionError(port);
     throw err;
   }
 }

@@ -210,6 +210,27 @@ export class LSPClient {
     });
   }
 
+  async workspaceSymbol(query: string): Promise<any[]> {
+    if (!this.connection) throw new Error("Connection not established");
+    const result = await this.connection.sendRequest("workspace/symbol", { query });
+    return (result as any[]) ?? [];
+  }
+
+  async references(uri: string, line: number, column: number): Promise<any[]> {
+    if (!this.connection) throw new Error("Connection not established");
+    const fileUri = uri.startsWith("file://") ? uri : `file://${uri}`;
+
+    // OmniSharp requires the document to be open for references
+    await this.didOpen(fileUri);
+
+    const result = await this.connection.sendRequest("textDocument/references", {
+      textDocument: { uri: fileUri },
+      position: { line: line - 1, character: column - 1 }, // LSP is 0-indexed
+      context: { includeDeclaration: true },
+    });
+    return (result as any[]) ?? [];
+  }
+
   async stop(): Promise<void> {
     if (this.connection) {
       try {

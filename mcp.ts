@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { readFileSync } from "fs";
 import { DiagnosticsCollector } from "./src/diagnostics/collector";
-import { query, status, notify, stop } from "./src/diagnostics/client";
+import { query, status, notify, stop, findSymbol, findUsages } from "./src/diagnostics/client";
 import { map } from "./src/code-mapping/mapper";
 import { matchFilePath, calculateSummary } from "./src/core/types";
 import { collectRustDiagnostics } from "./src/diagnostics/rust";
@@ -554,6 +554,10 @@ server.registerTool(
         "Maximum number of files to return. Applied after file_filter. Use 10–20 for a focused overview. " +
         "If omitted and response exceeds 200KB, files are auto-truncated with a warning field."
       ),
+      visibility: z.enum(["all", "public"]).optional().default("public").describe(
+        "Visibility filter (C# only). 'public' (default) shows only public/internal members. " +
+        "'all' includes private/protected members — useful for debugging internal sealed classes."
+      ),
     },
     annotations: {
       title: "Get Code Structure",
@@ -563,11 +567,11 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ path, format, language, depth, file_filter, max_files }) => {
+  async ({ path, format, language, depth, file_filter, max_files, visibility }) => {
     try {
       // Always request JSON from mapper — filtering (depth/file_filter/max_files/AX budget)
       // requires parsed JSON. After filtering, we serialize to the requested format.
-      const result = await map({ path, format: "json", language });
+      const result = await map({ path, format: "json", language, visibility });
 
       let parsed: any;
       try {
@@ -870,6 +874,114 @@ server.registerTool(
       return err(e instanceof Error ? e.message : String(e));
     } finally {
       release();
+    }
+  }
+);
+
+
+// ── find_symbol ──────────────────────────────────────────────────────────
+
+server.registerTool(
+  "find_symbol",
+  {
+    title: "Find Symbol",
+    description:
+      "Search for symbols by name in a C# solution using the running OmniSharp daemon. " +
+      "Returns matching classes, methods, interfaces, fields, and properties with their " +
+      "file locations and line numbers. REQUIRES a running daemon (call start_daemon first). " +
+      "Use this instead of grep to find type definitions and method declarations.",
+    inputSchema: {
+      query: z.string().describe("Symbol name or partial name to search for"),
+      kind: z.enum(["class", "method", "interface", "field", "property", "enum", "struct", "constructor", "namespace", "all"])
+        .optional().default("all")
+        .describe("Filter results by symbol kind. Default: all."),
+      limit: z.number().optional().default(50)
+        .describe("Maximum number of results to return. Default: 50."),
+      port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port"),
+    },
+    annotations: {
+      title: "Find Symbol",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({ query: symbolQuery, kind, limit, port }) => {
+    try {
+      const result = await findSymbol(port, symbolQuery, kind === "all" ? undefined : kind, limit);
+      return ok({ ...result });
+    } catch (e) {
+      return err(enrichError(e));
+    }
+  }
+);
+
+// ── find_usages ──────────────────────────────────────────────────────────
+
+server.registerTool(
+  "find_usages",
+  {
+    title: "Find Usages",
+    description:
+      "Find all references/usages of a symbol in a C# solution. " +
+      "Provide either file+line+column for a precise lookup, or symbol name for a convenience lookup " +
+      "(chains through workspace/symbol to resolve the location first). " +
+      "Returns the definition location and all usage locations. " +
+      "REQUIRES a running daemon (call start_daemon first).",
+    inputSchema: {
+      file: z.string().optional().describe("Absolute path to the file containing the symbol"),
+      line: z.number().optional().describe("1-indexed line number of the symbol"),
+      column: z.number().optional().describe("1-indexed column number of the symbol"),
+      symbol: z.string().optional().describe(
+        "Symbol name to search for (convenience). If provided without file+line+column, " +
+        "resolves location via find_symbol first. If ambiguous, uses the first match."
+      ),
+      port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port"),
+    },
+    annotations: {
+      title: "Find Usages",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({ file, line, column, symbol, port }) => {
+    try {
+      let resolvedFile = file;
+      let resolvedLine = line;
+      let resolvedColumn = column;
+
+      // Symbol-name convenience: resolve via find_symbol
+      let resolvedSymbol: { name: string; kind: string; file: string; line: number; column: number } | undefined;
+      if (!resolvedFile && symbol) {
+        const symbolResult = await findSymbol(port, symbol);
+        if (symbolResult.count === 0) {
+          return err(`No symbol found matching "${symbol}". Try a different name or use file+line+column.`);
+        }
+        resolvedSymbol = symbolResult.symbols[0]!;
+        resolvedFile = resolvedSymbol.file;
+        resolvedLine = resolvedSymbol.line;
+        resolvedColumn = resolvedSymbol.column;
+
+        if (symbolResult.count > 1) {
+          // Warn about ambiguity so agent can use file+line+column for precision
+          resolvedSymbol = { ...resolvedSymbol, ...{ ambiguous: true, totalMatches: symbolResult.count } } as any;
+        }
+      }
+
+      if (!resolvedFile || !resolvedLine || !resolvedColumn) {
+        return err("Provide either file+line+column or symbol name.");
+      }
+
+      const result = await findUsages(port, resolvedFile, resolvedLine, resolvedColumn);
+      return ok({
+        ...result,
+        ...(resolvedSymbol ? { resolvedFrom: resolvedSymbol } : {}),
+      });
+    } catch (e) {
+      return err(enrichError(e));
     }
   }
 );

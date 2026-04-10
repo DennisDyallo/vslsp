@@ -14,6 +14,7 @@ class Program
         string format = "text";
         string outputDir = Path.Combine(Directory.GetCurrentDirectory(), "codebase_ast");
         bool stdoutMode = false;
+        string visibility = "public";
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -30,6 +31,15 @@ class Program
                 outputDir = args[++i];
             else if (args[i] == "--stdout")
                 stdoutMode = true;
+            else if (args[i] == "--visibility" && i + 1 < args.Length)
+            {
+                visibility = args[++i].ToLower();
+                if (visibility is not ("all" or "public"))
+                {
+                    Console.Error.WriteLine("Invalid visibility. Use: all or public");
+                    return;
+                }
+            }
             else if (!args[i].StartsWith("--"))
                 path = args[i];
         }
@@ -72,7 +82,7 @@ class Program
                     var code = File.ReadAllText(file);
                     var tree = CSharpSyntaxTree.ParseText(code);
                     var root = tree.GetRoot();
-                    var collector = new StructureCollector(Path.GetRelativePath(projectDir, file));
+                    var collector = new StructureCollector(Path.GetRelativePath(projectDir, file), filterVisibility: visibility != "all");
                     collector.Visit(root);
                     if (collector.RootNode.Members.Any())
                         codebaseMap.Add(collector.RootNode);
@@ -357,10 +367,12 @@ public class StructureCollector : CSharpSyntaxWalker
 {
     public FileNode RootNode { get; }
     private Stack<CodeMember> _stack = new();
+    private readonly bool _filterVisibility;
 
-    public StructureCollector(string filePath)
+    public StructureCollector(string filePath, bool filterVisibility = true)
     {
         RootNode = new FileNode { FilePath = filePath };
+        _filterVisibility = filterVisibility;
     }
 
     // ── Visibility / modifier helpers ─────────────────────────────────────────
@@ -532,7 +544,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitClassDeclaration(ClassDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         string typeParams = TypeParamsToString(node.TypeParameterList);
         PushMember("Class", $"{modPrefix}class {node.Identifier.Text}{typeParams}",
@@ -543,7 +555,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitStructDeclaration(StructDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         string typeParams = TypeParamsToString(node.TypeParameterList);
         PushMember("Struct", $"{modPrefix}struct {node.Identifier.Text}{typeParams}",
@@ -554,7 +566,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitInterfaceDeclaration(InterfaceDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         string typeParams = TypeParamsToString(node.TypeParameterList);
         PushMember("Interface", $"{modPrefix}interface {node.Identifier.Text}{typeParams}",
@@ -565,7 +577,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitRecordDeclaration(RecordDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         string typeParams = TypeParamsToString(node.TypeParameterList);
         string paramList = node.ParameterList?.ToString() ?? "";
@@ -579,7 +591,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitEnumDeclaration(EnumDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         string sig = $"{modPrefix}enum {node.Identifier.Text}";
 
@@ -624,7 +636,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitConstructorDeclaration(ConstructorDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         PushMember("Constructor", $"{modPrefix}{node.Identifier.Text}{node.ParameterList}",
             node, node.Modifiers, node.AttributeLists);
@@ -633,7 +645,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitMethodDeclaration(MethodDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         string typeParams = TypeParamsToString(node.TypeParameterList);
         string sig = $"{modPrefix}{node.ReturnType} {node.Identifier.Text}{typeParams}{node.ParameterList}";
@@ -643,7 +655,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         // Include accessor summary: { get; set; } / { get; } / { get; init; }
         string accessors = "";
@@ -663,7 +675,7 @@ public class StructureCollector : CSharpSyntaxWalker
 
     public override void VisitFieldDeclaration(FieldDeclarationSyntax node)
     {
-        if (!IsPublicOrInternal(node.Modifiers)) return;
+        if (_filterVisibility && !IsPublicOrInternal(node.Modifiers)) return;
         string modPrefix = BuildModifierPrefix(node.Modifiers);
         string typeStr = node.Declaration.Type.ToString();
         string vis = ExtractVisibility(node.Modifiers);
