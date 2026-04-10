@@ -186,6 +186,74 @@ function filterCodeStructure(
   return result;
 }
 
+/** Serialize filtered code structure JSON to text tree format. */
+function toTextFormat(data: any): string {
+  const s = data.summary ?? {};
+  const lines: string[] = [
+    `# Summary: ${s.files ?? 0} files, ${s.namespaces ?? 0} namespaces, ${s.types ?? 0} types, ${s.methods ?? 0} methods`,
+  ];
+  for (const file of data.files ?? []) {
+    lines.push("");
+    lines.push(`# ${file.filePath ?? file.path ?? ""}`);
+    function walk(members: any[], indent: string) {
+      for (const m of members ?? []) {
+        const doc = m.docString ? ` // ${m.docString}` : "";
+        lines.push(`${indent}[${m.type}] ${m.signature} :${m.lineNumber}${doc}`);
+        if (m.children?.length) walk(m.children, indent + "  ");
+      }
+    }
+    walk(file.members ?? [], "  ");
+  }
+  if (data.warning) lines.push("", `# Warning: ${data.warning}`);
+  return lines.join("\n");
+}
+
+/** Serialize filtered code structure JSON to YAML format. */
+function toYamlFormat(data: any): string {
+  function yamlStr(s: string): string {
+    return s.includes('"') || s.includes(":") || s.includes("#") || s.includes("'")
+      ? `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : s || '""';
+  }
+  function member(m: any, indent: string): string[] {
+    const out: string[] = [
+      `${indent}- type: ${m.type}`,
+      `${indent}  signature: ${yamlStr(m.signature ?? "")}`,
+      `${indent}  lineNumber: ${m.lineNumber ?? 0}`,
+      `${indent}  isStatic: ${!!m.isStatic}`,
+      `${indent}  visibility: ${m.visibility ?? "public"}`,
+    ];
+    if (m.docString) out.push(`${indent}  docString: ${yamlStr(m.docString)}`);
+    if (m.baseTypes?.length) out.push(`${indent}  baseTypes: [${m.baseTypes.map(yamlStr).join(", ")}]`);
+    if (m.attributes?.length) out.push(`${indent}  attributes: [${m.attributes.map(yamlStr).join(", ")}]`);
+    if (m.children?.length) {
+      out.push(`${indent}  children:`);
+      for (const c of m.children) out.push(...member(c, indent + "    "));
+    }
+    return out;
+  }
+  const s = data.summary ?? {};
+  const lines = [
+    "summary:",
+    `  files: ${s.files ?? 0}`,
+    `  namespaces: ${s.namespaces ?? 0}`,
+    `  types: ${s.types ?? 0}`,
+    `  methods: ${s.methods ?? 0}`,
+    "",
+    "files:",
+  ];
+  for (const file of data.files ?? []) {
+    lines.push(`  - path: ${yamlStr(file.filePath ?? file.path ?? "")}`);
+    if (file.members?.length) {
+      lines.push("    members:");
+      for (const m of file.members) lines.push(...member(m, "      "));
+    } else {
+      lines.push("    members: []");
+    }
+  }
+  if (data.warning) lines.push("", `warning: ${yamlStr(data.warning)}`);
+  return lines.join("\n");
+}
+
 /** Count Namespace/Mod members recursively (Rust uses "Mod" for modules). */
 function countNamespaces(members: any[]): number {
   let count = 0;
@@ -500,31 +568,33 @@ server.registerTool(
   },
   async ({ path, format, language, depth, file_filter, max_files }) => {
     try {
-      const needsFilter = file_filter !== undefined || max_files !== undefined || (depth && depth !== "full");
-      // Always use JSON when filtering or when default format is JSON — AX budget
-      // enforcement requires parsing the output, so all JSON responses go through
-      // filterCodeStructure regardless of whether explicit filters are set.
-      const effectiveFormat = needsFilter ? "json" : (format ?? "json");
-      const result = await map({ path, format: effectiveFormat, language });
+      // Always request JSON from mapper — filtering (depth/file_filter/max_files/AX budget)
+      // requires parsed JSON. After filtering, we serialize to the requested format.
+      const result = await map({ path, format: "json", language });
 
-      if (effectiveFormat === "json") {
-        let parsed: any;
-        try {
-          parsed = JSON.parse(result.output);
-        } catch {
-          const detail = result.stderr ? ` Mapper stderr: ${result.stderr}` : "";
-          return err(`Failed to parse mapper JSON output.${detail}`);
-        }
-        const filtered = filterCodeStructure(parsed, {
-          file_filter,
-          max_files,
-          depth: depth ?? "signatures",
-          autoDetected: !language,
-        });
-        return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
+      let parsed: any;
+      try {
+        parsed = JSON.parse(result.output);
+      } catch {
+        const detail = result.stderr ? ` Mapper stderr: ${result.stderr}` : "";
+        return err(`Failed to parse mapper JSON output.${detail}`);
       }
 
-      return { content: [{ type: "text" as const, text: result.output }] };
+      const filtered = filterCodeStructure(parsed, {
+        file_filter,
+        max_files,
+        depth: depth ?? "signatures",
+        autoDetected: !language,
+      });
+
+      const fmt = format ?? "json";
+      if (fmt === "text") {
+        return { content: [{ type: "text" as const, text: toTextFormat(filtered) }] };
+      }
+      if (fmt === "yaml") {
+        return { content: [{ type: "text" as const, text: toYamlFormat(filtered) }] };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
     } catch (e) {
       return err(enrichError(e));
     }
