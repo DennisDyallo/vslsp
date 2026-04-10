@@ -192,17 +192,17 @@ function toTextFormat(data: any): string {
   const lines: string[] = [
     `# Summary: ${s.files ?? 0} files, ${s.namespaces ?? 0} namespaces, ${s.types ?? 0} types, ${s.methods ?? 0} methods`,
   ];
+  function walkText(members: any[], indent: string) {
+    for (const m of members ?? []) {
+      const doc = m.docString ? ` // ${m.docString}` : "";
+      lines.push(`${indent}[${m.type}] ${m.signature} :${m.lineNumber}${doc}`);
+      if (m.children?.length) walkText(m.children, indent + "  ");
+    }
+  }
   for (const file of data.files ?? []) {
     lines.push("");
     lines.push(`# ${file.filePath ?? file.path ?? ""}`);
-    function walk(members: any[], indent: string) {
-      for (const m of members ?? []) {
-        const doc = m.docString ? ` // ${m.docString}` : "";
-        lines.push(`${indent}[${m.type}] ${m.signature} :${m.lineNumber}${doc}`);
-        if (m.children?.length) walk(m.children, indent + "  ");
-      }
-    }
-    walk(file.members ?? [], "  ");
+    walkText(file.members ?? [], "  ");
   }
   if (data.warning) lines.push("", `# Warning: ${data.warning}`);
   return lines.join("\n");
@@ -210,9 +210,9 @@ function toTextFormat(data: any): string {
 
 /** Serialize filtered code structure JSON to YAML format. */
 function toYamlFormat(data: any): string {
+  // Always quote strings — matches mapper binary output which quotes every string field.
   function yamlStr(s: string): string {
-    return s.includes('"') || s.includes(":") || s.includes("#") || s.includes("'")
-      ? `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : s || '""';
+    return `"${(s ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   }
   function member(m: any, indent: string): string[] {
     const out: string[] = [
@@ -538,7 +538,7 @@ server.registerTool(
       "oversized responses are truncated with a warning field.",
     inputSchema: {
       path: z.string().describe("Absolute path to directory or file to analyze"),
-      format: z.enum(["text", "json", "yaml"]).optional().default("json").describe("Output format. Ignored when any filter param is set (always returns JSON)."),
+      format: z.enum(["text", "json", "yaml"]).optional().default("json").describe("Output format. Always respected — depth, file_filter, and max_files apply to all formats."),
       language: z.enum(["csharp", "rust", "typescript"]).optional().describe(
         "Language to analyze. Auto-detected from file extensions if omitted. " +
         "Auto-detection may silently return 0 files — pass explicitly for reliable results."
