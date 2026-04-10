@@ -2,45 +2,24 @@
 
 **Date:** 2026-04-10
 **Branch:** main
-**Last commit:** 08995e6 fix: AX format parity — single-file warning uses actual serialized size
+**Last commit:** fe539c6 chore: update handoff for v1.7.3 — format parity, AX audit, session complete
 
 ---
 
 ## Session Summary
 
-Two-day session (Apr 9–10) fully AX-driven across four releases. Starting from v1.5.3, the session produced v1.6.0 and v1.7.x (v1.7.0 through v1.7.3). The arc: build the AX constitution → audit against it → fix every gap found → ship.
+Two-day session (Apr 9–10). Goal: make vslsp fully AX-compliant — every tool, every format, every contract locked in CI. Starting from v1.5.3, shipped v1.6.0 and v1.7.0 through v1.7.3.
 
-**v1.6.0** (parallel worktree agents):
-- `docs/AX.md` — AX constitution (goal, budgets, 5 principles, tool schema standards, error message standard, CI enforcement, extension checklist)
-- `vslsp uninstall-mapper <lang>` — CLI install/uninstall symmetry
-- `tests/http.test.ts` rewrite — 4 brittle string matches → 16 real HTTP behavior tests
-
-**v1.7.0** (AX audit round 1 + round 2 + DevTeam fix loop):
-- `depth` default flipped `"full"` → `"signatures"` (AX-safe default)
-- `withDiagnosticsAxWarning()` — warns when `get_diagnostics` unfiltered > 50KB
-- `enrichError()` — ENOENT/EACCES → agent-actionable guidance in all tools
-- 13 AX ratchet tests (A1-A6, A3b, A4b, B1-B5, A5+) locked in CI
-- All tool schema descriptions updated with budget numbers and AX implications
-- `file_filter` 0-match runtime warning added
-
-**v1.7.1** — `vslsp --version` flag (CLI DX gap closed)
-
-**v1.7.2** — `toTextFormat()` + `toYamlFormat()` client-side serializers; `depth`/`file_filter`/`max_files` now apply to text and yaml formats (previously forced JSON)
-
-**CodeAudit fixes** (between v1.7.2 and v1.7.3):
-- `yamlStr()` always quotes (matches mapper binary output)
-- `walkText()` hoisted out of loop (anti-pattern fix)
-- `format` param description updated (no longer claims "ignored when filters set")
-
-**v1.7.3** — AX format parity: single-file oversized warning now uses actual serialized size for text/yaml, not JSON proxy (no false-positive warnings for text/yaml that fit the budget)
+The arc: write the AX constitution → audit every tool against it → fix every gap → audit again → fix again → ship. Two background audit agents, one DevTeam Engineer+Reviewer loop, three parallel worktree agents for v1.6.0.
 
 ---
 
 ## Current State
 
-### Committed Work (since v1.5.3)
+### Committed Work (this session)
 
 ```
+fe539c6 chore: update handoff for v1.7.3
 08995e6 fix: AX format parity — single-file warning uses actual serialized size
 e4050f5 fix: CodeAudit corrections to toTextFormat/toYamlFormat serializers
 a5e9547 fix: depth and file_filter now apply to text and yaml formats
@@ -65,23 +44,20 @@ None. Working tree clean.
 ### Build & Test Status
 
 - TypeScript: **clean** (`bun run tsc --noEmit`)
-- Unit tests: **49 pass, 0 fail** (http ×16, types ×10, store ×8, mapper ×6, typescript ×5, rust ×4)
-- E2E tests: **35 pass, 1 skip, 0 fail** (skip = RustMapper not installed)
-- Installed version: **v1.7.0** (upgrade with `install.sh --yes` once v1.7.3 CI builds)
+- Unit: **49 pass, 0 fail** (http×16, types×10, store×8, mapper×6, typescript×5, rust×4)
+- E2E: **35 pass, 1 skip, 0 fail** (skip = RustMapper not installed)
+- Released: **v1.7.3** — tagged and pushed, CI triggered
 
-### Format Output Reference
+### Worktree / Parallel Agent State
 
-All three formats use the same `src/core/types.ts` source, `depth:"signatures"`:
+Two stale worktrees from this session's v1.6.0 parallel agents — both merged into main:
 
-**JSON** — machine-parseable, all fields present, AX-filtered. ~8KB for this file at signatures depth.
+| Worktree | Branch | Last commit | Status |
+|----------|--------|-------------|--------|
+| `.claude/worktrees/agent-a53e50a8` | `worktree-agent-a53e50a8` | `e261cf3` docs: AX constitution | ✅ Merged — prune safe |
+| `.claude/worktrees/agent-add47742` | `worktree-agent-add47742` | `d00a1ca` feat: uninstall-mapper | ✅ Merged — prune safe |
 
-**Text** — `[Type] signature :lineNumber // docstring`. Lowest token cost. Good for quick scan.
-
-**YAML** — signatures always double-quoted (safe for `:` and `"` in type signatures). Medium token cost. Readable with nesting.
-
-### Worktree State
-
-Two stale worktrees from v1.6.0 parallel agents — both merged. Prune with: `git worktree prune`
+Prune: `git worktree prune`
 
 ---
 
@@ -91,43 +67,47 @@ Two stale worktrees from v1.6.0 parallel agents — both merged. Prune with: `gi
 
 | Need | Status | Notes |
 |------|--------|-------|
-| Get all compilation errors, scoped | ✅ Working | `get_diagnostics(severity:"error", limit:20)` → < 10KB |
-| Understand codebase structure without reading files | ✅ Working | `get_code_structure(depth:"signatures")` default; AX budget enforced |
-| Dry-run compile check before writing (C#) | ✅ Working | `verify_changes` with daemon; `reverted: true` |
-| Responses never exceed context window budget | ✅ Working | Auto-truncation at 200KB + warnings in all formats |
-| Warning when response would be too large | ✅ Working | `get_code_structure` truncates + warns; `get_diagnostics` warns at 50KB |
-| Install / uninstall mappers | ✅ Working | `vslsp install-mapper` + `vslsp uninstall-mapper` |
-| AX contracts locked in CI | ✅ Working | 13 ratchet tests (A1-A6, A3b, A4b, B1-B5) |
-| AX philosophy documented | ✅ Working | `docs/AX.md` constitution |
-| All output formats AX-equivalent | ✅ Working | JSON/text/yaml all filtered, all warn, all AX-safe (v1.7.3) |
-| Version self-reporting | ✅ Working | `vslsp --version` (v1.7.1+) |
+| Get compilation errors scoped to what matters | ✅ Working | `severity:"error"` + `limit:20` → < 10KB. Warning fires when unfiltered > 50KB |
+| Understand codebase structure without reading files | ✅ Working | `depth:"signatures"` default; AX truncation at 200KB across all 3 formats |
+| Dry-run compile check before writing (C#) | ✅ Working | `verify_changes` with daemon; in-memory, disk never touched |
+| Responses never exceed context window budget | ✅ Working | Multi-file: auto-truncated with agent-actionable warning. Single-file: warns using actual format size (v1.7.3) |
+| Know when a response is too large and what to do | ✅ Working | Every warning follows AX standard: what happened + directive + example |
+| Install / remove language mappers | ✅ Working | `vslsp install-mapper <lang>` + `vslsp uninstall-mapper <lang>` |
+| Query any project, any directory | ✅ Working | All tools are stateless; `path`/`project`/`manifest`/`solution` per-call |
+| AX contracts don't regress in CI | ✅ Working | 13 ratchet tests: A1-A6, A3b, A4b, B1-B5 (dual-bound: upper + lower) |
+| Check installed version | ✅ Working | `vslsp --version` (v1.7.1+) |
+| All output formats AX-equivalent | ✅ Working | JSON/text/yaml all filtered, all warn, warnings use actual format size (v1.7.3) |
 
-**Overall:** ⭐ **Complete** — all AX goals met across all formats, 13 ratchet tests in CI, three audit rounds converged to clean, v1.7.3 released.
+**Overall:** ⭐ **Complete** — all stated AX goals met, all formats compliant, 13 ratchet tests in CI, three audit rounds converged to clean. v1.7.3 released.
 
-**Critical next step:** No critical items. Install v1.7.3 once CI builds: `curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh | bash -s -- --yes`
+**Critical next step:** No critical items. Upgrade installed binary once CI builds v1.7.3:
+```bash
+curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh | bash -s -- --yes
+vslsp --version  # → 1.7.3
+```
 
 ---
 
 ## What's Next (Optional / Future)
 
-1. **Go mapper** — Pattern established. `GoMapper` + registry + CI matrix + `install.sh`. Carried forward since v1.5.3.
+1. **Go mapper** — Pattern established. Add `GoMapper` to registry, CI matrix, `install.sh`. Carried forward since v1.5.3.
 2. **Rust/TypeScript daemon** — `verify_changes` dry-run is C#-only. Requires persistent `cargo check`/`tsc` processes.
-3. **Multi-file AX truncation calibrated per format** — Currently uses JSON size as proxy (conservative, always safe). Could be calibrated to actual format size for fewer unnecessary truncations.
-4. **`vslsp install-mapper rust` 404 investigation** — CI may not be cross-compiling Rust mapper for patch releases. Check `.github/workflows/release.yml` build matrix.
+3. **Multi-file AX truncation calibrated per format** — JSON size used as proxy for text/yaml (conservative, always safe). True per-format calibration would need restructuring.
+4. **RustMapper 404 on patch releases** — Investigate `.github/workflows/release.yml` — CI may not build Rust mapper on every patch tag.
 5. **Prune stale worktrees** — `git worktree prune`
 
 ---
 
 ## Blockers & Known Issues
 
-- **RustMapper 404** — `vslsp install-mapper rust` fails with 404 on v1.7.x patch releases. Likely CI doesn't build Rust mapper on every patch. Workaround: use v1.7.0 binary for Rust mapper, or check release assets.
-- **Installed binary is v1.7.0** — upgrade with `install.sh --yes` once v1.7.3 CI releases.
-- **1 E2E test skipped** — RustMapper not installed. `vslsp install-mapper rust` to fix (once 404 resolved).
+- **RustMapper 404** — `vslsp install-mapper rust` fails with 404 on v1.7.x patches. Use v1.7.0 asset: `gh release download v1.7.0 --pattern "RustMapper-darwin-arm64" -D ~/.local/share/vslsp/rust-mapper/`
+- **Installed binary is v1.7.0** — reinstall once v1.7.3 CI publishes.
+- **1 E2E test skipped** — RustMapper not installed (see above).
 
 **Intentional keeps:**
-- Single-file oversize warns but doesn't truncate — `depth:"full"` is opt-in
-- Multi-file AX truncation uses JSON size as proxy — conservative but always safe
-- `withDiagnosticsAxWarning` warns only (no truncation) — preserves full diagnostic semantics
+- Single-file oversize warns but doesn't truncate — `depth:"full"` is opt-in, agent can use `"signatures"` instead
+- Multi-file truncation uses JSON as size proxy — always conservative (safe, never returns too much)
+- `withDiagnosticsAxWarning` warns only for diagnostics — truncating diagnostic results would change semantics
 
 ---
 
@@ -135,17 +115,17 @@ Two stale worktrees from v1.6.0 parallel agents — both merged. Prune with: `gi
 
 | File | Purpose |
 |------|---------|
-| `docs/AX.md` | AX constitution |
+| `docs/AX.md` | AX constitution — canonical philosophy |
 | `mcp.ts:99,108` | `AX_BUDGET_BYTES` (200KB), `AX_DIAG_WARN_BYTES` (50KB) |
-| `mcp.ts:110-188` | `filterCodeStructure()` — all filtering + AX truncation |
-| `mcp.ts:190-210` | `toTextFormat()` — JSON → text serializer |
-| `mcp.ts:212-256` | `toYamlFormat()` — JSON → YAML serializer (always-quoted strings) |
-| `mcp.ts:219-240` | `withDiagnosticsAxWarning()` — diagnostics oversize warning |
-| `mcp.ts:285-295` | `enrichError()` — ENOENT/EACCES → agent-actionable guidance |
+| `mcp.ts:110-188` | `filterCodeStructure()` — depth/glob/max_files + truncation |
+| `mcp.ts:190-210` | `toTextFormat()` — JSON → text |
+| `mcp.ts:212-256` | `toYamlFormat()` — JSON → YAML (always-quoted strings) |
+| `mcp.ts:219-240` | `withDiagnosticsAxWarning()` — diagnostics 50KB threshold |
+| `mcp.ts:285-295` | `enrichError()` — ENOENT/EACCES agent guidance |
 | `mcp.ts:464` | `depth` default `"signatures"` |
-| `mcp.ts:587-614` | Handler — serialize to format, single-file AX check on actual size |
-| `tests/e2e/mcp-server.test.ts` | 13 AX ratchet tests (A1-A6, A3b, A4b, B1-B5) |
-| `tests/http.test.ts` | 16 real HTTP behavior tests |
+| `mcp.ts:587-614` | Handler — format serialization + actual-size AX check |
+| `tests/e2e/mcp-server.test.ts` | 13 AX ratchet tests |
+| `tests/http.test.ts` | 16 HTTP behavior tests |
 | `vslsp.ts` | CLI — `install-mapper`, `uninstall-mapper`, `--version` |
 
 ---
@@ -155,6 +135,7 @@ Two stale worktrees from v1.6.0 parallel agents — both merged. Prune with: `gi
 ```bash
 cd /Users/Dennis.Dyall/Code/other/vslsp
 
+# Verify state
 git log --oneline -5
 git status
 bun run tsc --noEmit
@@ -163,19 +144,19 @@ bun test tests/http.test.ts tests/diagnostics/store.test.ts tests/core/types.tes
   tests/diagnostics/typescript.test.ts --timeout 30000
 bun test tests/e2e/mcp-server.test.ts --timeout 120000
 
-# Current release: v1.7.3
+# v1.7.3 — AX-complete across JSON/text/yaml
 # AX constitution: docs/AX.md
 # 13 AX ratchet tests in CI
-# All formats (json/text/yaml) AX-equivalent since v1.7.3
 
-# Install latest (once v1.7.3 CI builds):
+# Upgrade installed binary (once v1.7.3 CI builds):
 curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh | bash -s -- --yes
 vslsp --version  # → 1.7.3
 
-# Reinstall Rust mapper (404 on patch releases — use v1.7.0 asset directly):
-# gh release download v1.7.0 --pattern "RustMapper-darwin-arm64" -D ~/.local/share/vslsp/rust-mapper/
-# chmod +x ~/.local/share/vslsp/rust-mapper/RustMapper
+# Fix Rust mapper 404:
+gh release download v1.7.0 --pattern "RustMapper-darwin-arm64" \
+  --repo DennisDyallo/vslsp -D ~/.local/share/vslsp/rust-mapper/
+chmod +x ~/.local/share/vslsp/rust-mapper/RustMapper
 
-# Prune stale session worktrees:
+# Prune stale worktrees:
 git worktree prune
 ```
