@@ -234,7 +234,9 @@ async function installMapper(language: string): Promise<void> {
   const archPart = (rawArch === "x86_64" || rawArch === "amd64") ? "x64" : "arm64";
   const platform = `${osPart}-${archPart}`;
 
-  const version = typeof VSLSP_VERSION !== "undefined" ? VSLSP_VERSION : "latest";
+  const rawVersion = typeof VSLSP_VERSION !== "undefined" ? VSLSP_VERSION : "latest";
+  // GitHub tags use v-prefix (v1.7.4); VSLSP_VERSION is set from package.json (1.7.4)
+  const version = rawVersion === "latest" ? "latest" : rawVersion.startsWith("v") ? rawVersion : `v${rawVersion}`;
   const assetName = `${m.binaryName}-${platform}`;
   const url = version === "latest"
     ? `https://github.com/DennisDyallo/vslsp/releases/latest/download/${assetName}`
