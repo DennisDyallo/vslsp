@@ -68,10 +68,13 @@ function applyDepth(members: any[], depth: string): any[] {
       .filter(m => TYPE_DEPTH_KINDS.has(m.type))
       .map(m => ({ ...m, children: applyDepth(m.children ?? [], "types") }));
   }
-  // depth === "signatures": all members, but grandchildren stripped
+  // depth === "signatures": all members with signatures, but leaf children stripped.
+  // Container types (Namespace, Class, etc.) recurse so nested types keep their methods.
   return members.map(m => ({
     ...m,
-    children: (m.children ?? []).map((c: any) => ({ ...c, children: [] })),
+    children: TYPE_DEPTH_KINDS.has(m.type)
+      ? applyDepth(m.children ?? [], depth)        // recurse into containers
+      : (m.children ?? []).map((c: any) => ({ ...c, children: [] })),  // leaf: strip grandchildren
   }));
 }
 

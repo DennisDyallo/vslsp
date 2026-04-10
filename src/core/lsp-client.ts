@@ -72,6 +72,14 @@ export class LSPClient {
       spawnReject(error);
     });
 
+    this.process.on("exit", (code, signal) => {
+      console.error(`[LSP] OmniSharp process exited (code=${code}, signal=${signal})`);
+      this._isReady = false;
+      this.connection?.dispose();
+      this.connection = null;
+      this.process = null;
+    });
+
     this.connection = createMessageConnection(
       new StreamMessageReader(this.process.stdout),
       new StreamMessageWriter(this.process.stdin)

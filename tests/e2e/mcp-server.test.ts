@@ -29,6 +29,8 @@ const EXPECTED_TOOLS = [
   "stop_daemon",
   "notify_file_changed",
   "verify_changes",
+  "find_symbol",
+  "find_usages",
 ];
 
 let client: Client;
@@ -167,7 +169,7 @@ describe("MCP Server Handshake", () => {
     const { tools } = await client.listTools();
 
     // Exact count
-    expect(tools).toBeArrayOfSize(8);
+    expect(tools).toBeArrayOfSize(10);
 
     // All expected names present
     const names = tools.map((t) => t.name).sort();
@@ -618,7 +620,7 @@ describe("get_code_structure via MCP", () => {
       const typesSize = (typed as any).content[0].text.length;
 
       expect(typesSize).toBeLessThan(fullSize);           // filter reduces output
-      expect(typesSize).toBeLessThan(30_000);             // AX upper bound: 30KB
+      expect(typesSize).toBeLessThan(40_000);             // AX upper bound: 40KB (grows with codebase)
       expect(typesData.files.length).toBeGreaterThan(0);  // lower bound: real data
 
       // depth: "types" members must not have Method/Fn/Constructor children
@@ -915,7 +917,7 @@ describe("server error resilience", () => {
 
     // Valid request after three errors — server must still work
     const { tools } = await client.listTools();
-    expect(tools).toBeArrayOfSize(8);
+    expect(tools).toBeArrayOfSize(10);
 
     // Valid tool call after errors — confirm full functionality
     const statusResult = await client.callTool({

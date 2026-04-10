@@ -1,7 +1,7 @@
 import type { Server } from "bun";
 import type { LSPClient } from "../core/lsp-client";
 import type { DiagnosticsStore } from "./store";
-import { existsSync, readFileSync } from "fs";
+import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { log } from "../core/logger";
 import { symbolKindToString } from "../core/types";
@@ -142,7 +142,7 @@ export function createHttpServer(options: HttpServerOptions) {
 
           // Identify definition: the location matching the queried position
           const defIdx = allLocations.findIndex((loc: any) =>
-            loc.file === normalizedFile && loc.line === parsedLine
+            loc.file === normalizedFile && loc.line === parsedLine && loc.column === parsedColumn
           );
           const definition = defIdx >= 0 ? allLocations[defIdx] : undefined;
           const usages = allLocations.filter((_: any, i: number) => i !== defIdx);

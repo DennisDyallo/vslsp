@@ -20,27 +20,28 @@ export interface MapResult {
 }
 
 export async function map(options: MapOptions): Promise<MapResult> {
-  // Resolve binary: explicit language > extension detection > legacy codeMapperPath > C# default
+  // Detect language once — reused for binary resolution, error messages, and visibility flag
+  const detected = options.language ? getMapper(options.language) : detectLanguage(options.path);
+  const lang = detected?.language ?? options.language;
+
+  // Resolve binary: explicit language > legacy codeMapperPath > extension detection > C# default
   let binaryPath: string;
-  if (options.language) {
-    const m = getMapper(options.language);
-    binaryPath = m?.binaryPath ?? options.codeMapperPath ?? DEFAULT_CSHARP_MAPPER;
+  if (options.language && detected) {
+    binaryPath = detected.binaryPath;
   } else if (options.codeMapperPath) {
     binaryPath = options.codeMapperPath;
+  } else if (detected) {
+    binaryPath = detected.binaryPath;
   } else {
-    const detected = detectLanguage(options.path);
-    binaryPath = detected?.binaryPath ?? DEFAULT_CSHARP_MAPPER;
+    binaryPath = DEFAULT_CSHARP_MAPPER;
   }
 
   binaryPath = resolve(binaryPath);
 
   if (!existsSync(binaryPath)) {
-    const langLabel = options.language
-      ?? detectLanguage(options.path)?.language
-      ?? "csharp";
     throw new Error(
       `Mapper binary not found at: ${binaryPath}\n` +
-      `Install it with: vslsp install-mapper ${langLabel}`
+      `Install it with: vslsp install-mapper ${lang ?? "csharp"}`
     );
   }
 
@@ -59,7 +60,6 @@ export async function map(options: MapOptions): Promise<MapResult> {
   // --visibility is only supported by CSharpMapper; Rust/TS mappers would
   // misinterpret the value as a positional path argument. Only pass for C#,
   // and only when non-default ("public" is the mapper's built-in default).
-  const lang = options.language ?? detectLanguage(options.path)?.language;
   if (options.visibility === "all" && lang === "csharp") {
     args.push("--visibility", "all");
   }
