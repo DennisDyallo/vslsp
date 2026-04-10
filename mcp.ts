@@ -130,14 +130,14 @@ function filterCodeStructure(
 
   // AX byte-budget truncation: if no explicit max_files and response exceeds budget,
   // progressively remove files from the end until under budget.
+  // Note: budget is probed in JSON — conservative for text/yaml (always safe, may over-truncate).
   let axTruncated = false;
   let preCapFileCount = files.length;
   if (opts.max_files === undefined) {
     const probe = buildResult(files, opts.autoDetected);
     const probeSize = JSON.stringify(probe, null, 2).length;
     if (probeSize > AX_BUDGET_BYTES && files.length > 1) {
-      // Binary search for the largest file count that fits within budget
-      // Use pretty-printed JSON (null, 2) to match actual MCP response format
+      // Binary search for the largest file count that fits within the JSON budget.
       let lo = 1, hi = files.length;
       while (lo < hi) {
         const mid = Math.ceil((lo + hi) / 2);
@@ -163,7 +163,7 @@ function filterCodeStructure(
     result.warning = result.warning ? result.warning + " " + msg : msg;
   }
 
-  // Build AX warning — merge with any existing warning (e.g. auto-detection) instead of overwriting
+  // Build AX truncation warning — merged with any existing warning
   if (axTruncated) {
     const axMsg =
       `Response truncated from ${preCapFileCount} to ${files.length} files to fit context window budget (${Math.round(AX_BUDGET_BYTES / 1000)}KB). ` +
@@ -171,15 +171,12 @@ function filterCodeStructure(
     result.warning = result.warning ? result.warning + " " + axMsg : axMsg;
   }
 
-  // Single-file edge case: if even 1 file exceeds budget, warn but return it
-  if (!axTruncated && opts.max_files === undefined && files.length > 0) {
-    const size = JSON.stringify(result, null, 2).length;
-    if (size > AX_BUDGET_BYTES) {
-      const sizeKB = Math.round(size / 1000);
-      const msg =
-        `Response (${sizeKB}KB) exceeds context window budget (${Math.round(AX_BUDGET_BYTES / 1000)}KB). ` +
-        `Try depth: "signatures" to stay within budget — it reduces output ~10x. If you need complete output, read the file directly instead of using get_code_structure.`;
-      result.warning = result.warning ? result.warning + " " + msg : msg;
+  // Single-file oversized flag: set on result so the handler can warn using the actual
+  // serialized size (JSON, text, or yaml) rather than always probing JSON.
+  if (!axTruncated && opts.max_files === undefined && files.length === 1) {
+    const jsonSize = JSON.stringify(result, null, 2).length;
+    if (jsonSize > AX_BUDGET_BYTES) {
+      (result as any).__singleFileOversize = true;
     }
   }
 
@@ -588,13 +585,33 @@ server.registerTool(
       });
 
       const fmt = format ?? "json";
+      let output: string;
       if (fmt === "text") {
-        return { content: [{ type: "text" as const, text: toTextFormat(filtered) }] };
+        output = toTextFormat(filtered);
+      } else if (fmt === "yaml") {
+        output = toYamlFormat(filtered);
+      } else {
+        output = JSON.stringify(filtered, null, 2);
       }
-      if (fmt === "yaml") {
-        return { content: [{ type: "text" as const, text: toYamlFormat(filtered) }] };
+
+      // Single-file oversized check: warn using actual serialized size, not JSON proxy.
+      // filterCodeStructure sets __singleFileOversize when JSON size > budget; here we
+      // confirm against the real output and emit the warning only if it actually exceeds.
+      if ((filtered as any).__singleFileOversize) {
+        delete (filtered as any).__singleFileOversize;
+        if (output.length > AX_BUDGET_BYTES) {
+          const sizeKB = Math.round(output.length / 1000);
+          const msg =
+            `Response (${sizeKB}KB) exceeds context window budget (${Math.round(AX_BUDGET_BYTES / 1000)}KB). ` +
+            `Try depth: "signatures" to stay within budget — it reduces output ~10x. ` +
+            `If you need complete output, read the file directly instead of using get_code_structure.`;
+          // Re-serialize with warning injected
+          filtered.warning = filtered.warning ? filtered.warning + " " + msg : msg;
+          output = fmt === "text" ? toTextFormat(filtered) : fmt === "yaml" ? toYamlFormat(filtered) : JSON.stringify(filtered, null, 2);
+        }
       }
-      return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
+
+      return { content: [{ type: "text" as const, text: output }] };
     } catch (e) {
       return err(enrichError(e));
     }
