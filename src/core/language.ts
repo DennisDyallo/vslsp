@@ -6,7 +6,7 @@ export type DaemonLanguage = "csharp" | "typescript" | "rust";
 
 export interface LanguageConfig {
   language: DaemonLanguage;
-  languageId: string;
+  languageId: DaemonLanguage;
   resolveServerBinary: () => string;
   serverArgs: (manifestPath: string) => string[];
   rootUri: (manifestPath: string) => string;

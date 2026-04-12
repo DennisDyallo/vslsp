@@ -1,4 +1,4 @@
-import { existsSync, watch, statSync, readdirSync, readFileSync } from "fs";
+import { existsSync, watch, statSync, readdirSync } from "fs";
 import { resolve, dirname, join, basename } from "path";
 import { LSPClient } from "../core/lsp-client";
 import { DiagnosticsStore } from "./store";
@@ -64,17 +64,14 @@ export async function serve(options: ServeOptions): Promise<void> {
     const patterns = options.language === "typescript"
       ? ["**/*.ts", "**/*.tsx"]
       : ["**/*.rs"];
-    const exclude = ["**/node_modules/**", "**/target/**", "**/.git/**", "**/dist/**"];
+    const EXCLUDED_SEGMENTS = new Set(["node_modules", "target", ".git", "dist"]);
 
     let opened = 0;
     const MAX_BOOTSTRAP_FILES = 50;
     for (const pattern of patterns) {
       const glob = new Glob(pattern);
       for (const match of glob.scanSync({ cwd: rootDir, absolute: true })) {
-        if (exclude.some(ex => {
-          const exPart = ex.replace(/\*\*/g, "");
-          return match.includes(exPart);
-        })) continue;
+        if (match.split("/").some(seg => EXCLUDED_SEGMENTS.has(seg))) continue;
         if (opened >= MAX_BOOTSTRAP_FILES) break;
         try {
           await client.didOpen(match);

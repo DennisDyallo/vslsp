@@ -307,8 +307,13 @@ function withDiagnosticsAxWarning(result: any, severity?: string, limit?: number
   return { ...result, warning: msg };
 }
 
-/** Filter a DiagnosticsResult by minimum severity and total limit. */
-function filterDiagnostics(result: any, minSeverity?: string, limit?: number): any {
+/** Filter a DiagnosticsResult by severity/limit and attach AX warning if unfiltered response is large. */
+function applyDiagnosticsFilters(result: any, severity?: string, limit?: number): any {
+  const filtered = filterDiagnosticsImpl(result, severity, limit);
+  return withDiagnosticsAxWarning(filtered, severity, limit);
+}
+
+function filterDiagnosticsImpl(result: any, minSeverity?: string, limit?: number): any {
   if (!minSeverity && limit === undefined) return result;
 
   const maxLevel = minSeverity !== undefined ? (SEVERITY_ORDER[minSeverity] ?? 3) : 3;
@@ -348,6 +353,15 @@ function acquireVerifyLock(): Promise<() => void> {
   const prev = verifyLockChain;
   verifyLockChain = new Promise((r) => { release = r; });
   return prev.then(() => release!);
+}
+
+/** Validate that exactly one manifest path (solution, manifest, or project) is provided. */
+function resolveManifestPath(solution?: string, manifest?: string, project?: string): string {
+  const paths = [solution, manifest, project].filter(Boolean) as string[];
+  if (paths.length !== 1) {
+    throw new Error("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
+  }
+  return paths[0]!;
 }
 
 /** Enrich raw errors with agent-actionable guidance for common OS error patterns. */
@@ -430,14 +444,14 @@ server.registerTool(
       // --- Rust ---
       if (manifest) {
         const raw = await collectRustDiagnostics({ manifest, package: rustPackage, file, allTargets: all_targets });
-        const result = withDiagnosticsAxWarning(filterDiagnostics(raw, severity, limit), severity, limit);
+        const result = applyDiagnosticsFilters(raw, severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
       // --- TypeScript ---
       if (project) {
         const raw = await collectTsDiagnostics({ project, file });
-        const result = withDiagnosticsAxWarning(filterDiagnostics(raw, severity, limit), severity, limit);
+        const result = applyDiagnosticsFilters(raw, severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
@@ -445,7 +459,7 @@ server.registerTool(
       log("info", "get_diagnostics", { solution, use_daemon, file });
       if (use_daemon) {
         const raw = await query({ port, file, summary: false });
-        const result = withDiagnosticsAxWarning(filterDiagnostics(raw.data, severity, limit), severity, limit);
+        const result = applyDiagnosticsFilters(raw.data, severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       }
 
@@ -464,7 +478,7 @@ server.registerTool(
         result.clean = result.summary.errors === 0;
       }
 
-      const filtered = withDiagnosticsAxWarning(filterDiagnostics(result, severity, limit), severity, limit);
+      const filtered = applyDiagnosticsFilters(result, severity, limit);
       return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
     } catch (e) {
       log("error", "tool error", { tool: "get_diagnostics", message: e instanceof Error ? e.message : String(e) });
@@ -500,13 +514,7 @@ server.registerTool(
   },
   async ({ solution, manifest, project, use_daemon, port }) => {
     try {
-      const manifestPath = solution || manifest || project;
-      if (!manifestPath) {
-        return err("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
-      }
-      if ([solution, manifest, project].filter(Boolean).length > 1) {
-        return err("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
-      }
+      const manifestPath = resolveManifestPath(solution, manifest, project);
 
       if (use_daemon) {
         const lang = detectLanguage(manifestPath);
@@ -674,14 +682,7 @@ server.registerTool(
   },
   async ({ solution, manifest, project, port }) => {
     try {
-      const manifestPath = solution || manifest || project;
-      if (!manifestPath) {
-        return err("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
-      }
-      if ([solution, manifest, project].filter(Boolean).length > 1) {
-        return err("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
-      }
-
+      const manifestPath = resolveManifestPath(solution, manifest, project);
       const lang = detectLanguage(manifestPath);
       const resolvedPort = port ?? getLanguageConfig(lang).defaultPort;
 

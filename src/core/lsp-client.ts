@@ -161,7 +161,7 @@ export class LSPClient {
     await this.connection.sendNotification("textDocument/didOpen", {
       textDocument: {
         uri: fileUri,
-        languageId: resolveLanguageId(this.options.languageId as any, fileUri),
+        languageId: resolveLanguageId(this.options.languageId, fileUri),
         version: 1,
         text,
       },

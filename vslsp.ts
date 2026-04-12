@@ -6,7 +6,7 @@ import { map } from "./src/code-mapping/mapper";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CSHARP_MAPPER } from "./src/core/defaults";
 import { getMapper } from "./src/code-mapping/registry";
 import { setLogLevel } from "./src/core/logger";
-import { detectLanguage } from "./src/core/language";
+import { detectLanguage, getLanguageConfig } from "./src/core/language";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 
@@ -388,7 +388,7 @@ async function main() {
       // Use language-specific default port if user didn't explicitly set --port
       const port = process.argv.includes("--port") || process.argv.includes("-p")
         ? args.port
-        : (await import("./src/core/language")).getLanguageConfig(lang).defaultPort;
+        : getLanguageConfig(lang).defaultPort;
       await serve({
         manifestPath,
         port,
