@@ -10,6 +10,7 @@ import {
   type PublishDiagnosticsParams,
 } from "vscode-languageserver-protocol";
 import type { LSPClientOptions } from "./types";
+import { resolveLanguageId } from "./language";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 
@@ -36,7 +37,7 @@ export class LSPClient {
   }
 
   async start(): Promise<void> {
-    const args = ["-lsp", "-s", this.options.solutionPath];
+    const args = this.options.serverArgs;
 
     this.readyPromise = new Promise((resolve, reject) => {
       this.readyResolve = resolve;
@@ -45,13 +46,13 @@ export class LSPClient {
 
     // Explicitly pass process.env — Bun compiled binaries do not always propagate
     // the full environment to grandchild processes via child_process.spawn without it.
-    this.process = spawn(this.options.omnisharpPath, args, {
+    this.process = spawn(this.options.serverBinary, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
 
     if (!this.process.stdin || !this.process.stdout) {
-      throw new Error("Failed to create OmniSharp process streams");
+      throw new Error("Failed to create LSP server process streams");
     }
 
     this.process.stderr?.on("data", (data) => {
@@ -65,15 +66,15 @@ export class LSPClient {
     });
 
     this.process.on("error", (err) => {
-      console.error(`[LSP] OmniSharp process error: ${err.message}`);
+      console.error(`[LSP] LSP server process error: ${err.message}`);
       this._isReady = false;
-      const error = new Error(`OmniSharp process error: ${err.message}`);
+      const error = new Error(`LSP server process error: ${err.message}`);
       this.readyReject?.(error);
       spawnReject(error);
     });
 
     this.process.on("exit", (code, signal) => {
-      console.error(`[LSP] OmniSharp process exited (code=${code}, signal=${signal})`);
+      console.error(`[LSP] LSP server process exited (code=${code}, signal=${signal})`);
       this._isReady = false;
       this.connection?.dispose();
       this.connection = null;
@@ -92,7 +93,7 @@ export class LSPClient {
 
     this.connection.listen();
 
-    // Race initialize() against spawn error — if OmniSharp fails to start,
+    // Race initialize() against spawn error — if the LSP server fails to start,
     // spawnFailed rejects immediately and we propagate the error instead of
     // sending requests on dead streams (which would crash the MCP server).
     const initPromise = this.initialize();
@@ -113,7 +114,7 @@ export class LSPClient {
 
     const initParams: InitializeParams = {
       processId: process.pid,
-      rootUri: `file://${this.options.solutionPath.replace(/[^/\\]+$/, "")}`,
+      rootUri: this.options.rootUri,
       capabilities: {
         textDocument: {
           publishDiagnostics: {
@@ -129,6 +130,9 @@ export class LSPClient {
         },
       },
       workspaceFolders: null,
+      ...(this.options.initializationOptions
+        ? { initializationOptions: this.options.initializationOptions }
+        : {}),
     };
 
     await this.connection.sendRequest("initialize", initParams);
@@ -157,7 +161,7 @@ export class LSPClient {
     await this.connection.sendNotification("textDocument/didOpen", {
       textDocument: {
         uri: fileUri,
-        languageId: "csharp",
+        languageId: resolveLanguageId(this.options.languageId as any, fileUri),
         version: 1,
         text,
       },
@@ -228,7 +232,7 @@ export class LSPClient {
     if (!this.connection) throw new Error("Connection not established");
     const fileUri = uri.startsWith("file://") ? uri : `file://${uri}`;
 
-    // OmniSharp requires the document to be open for references
+    // LSP server requires the document to be open for references
     await this.didOpen(fileUri);
 
     const result = await this.connection.sendRequest("textDocument/references", {

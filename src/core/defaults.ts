@@ -2,6 +2,8 @@ import { join } from "path";
 import { existsSync } from "fs";
 
 export const DEFAULT_PORT = 7850;
+export const DEFAULT_TS_PORT = 7851;
+export const DEFAULT_RUST_PORT = 7852;
 
 export const DEFAULT_OMNISHARP = join(
   process.env.HOME || "~",

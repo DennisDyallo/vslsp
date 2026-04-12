@@ -6,6 +6,7 @@ import { map } from "./src/code-mapping/mapper";
 import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_CSHARP_MAPPER } from "./src/core/defaults";
 import { getMapper } from "./src/code-mapping/registry";
 import { setLogLevel } from "./src/core/logger";
+import { detectLanguage } from "./src/core/language";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 
@@ -13,17 +14,19 @@ import { join, resolve } from "path";
 declare const VSLSP_VERSION: string;
 
 const HELP = `
-vslsp - C# LSP Diagnostics Tool
+vslsp - Multi-Language LSP Diagnostics Tool
 
 USAGE:
-  # One-shot mode (backward compatible)
+  # One-shot mode (C# only, backward compatible)
   vslsp --solution <path.sln> [options]
 
-  # Daemon mode
+  # Daemon mode (C#, TypeScript, Rust)
   vslsp serve --solution <path.sln> [--port 7850]
+  vslsp serve --project <tsconfig.json> [--port 7851]
+  vslsp serve --manifest <Cargo.toml> [--port 7852]
   vslsp query [--file <path>] [--summary] [--port 7850]
   vslsp status [--port 7850]
-  vslsp notify --file <path.cs> [--port 7850]
+  vslsp notify --file <path> [--port 7850]
 
   # Code structure mapping
   vslsp map [path] [--format text|json|yaml] [--output dir]
@@ -53,7 +56,10 @@ OPTIONS (one-shot mode):
   --omnisharp <path>    OmniSharp binary path
 
 OPTIONS (daemon mode):
-  --port <number>       HTTP port (default: 7850)
+  --solution <path>     Path to .sln file (C#, default port 7850)
+  --project <path>      Path to tsconfig.json (TypeScript, default port 7851)
+  --manifest <path>     Path to Cargo.toml (Rust, default port 7852)
+  --port <number>       HTTP port (overrides language default)
   --file <path>         Filter by file (query) or file to notify
   --summary             Return only counts (query)
 
@@ -64,11 +70,17 @@ OPTIONS (map mode):
   --code-mapper <path>  CSharpMapper binary path (legacy)
 
 EXAMPLES:
-  # One-shot (existing behavior)
+  # One-shot (existing behavior, C# only)
   vslsp --solution ./MyProject.sln
 
-  # Start daemon
+  # Start C# daemon
   vslsp serve --solution ./MyProject.sln --port 7850
+
+  # Start TypeScript daemon
+  vslsp serve --project ./tsconfig.json
+
+  # Start Rust daemon
+  vslsp serve --manifest ./Cargo.toml
 
   # Query daemon
   vslsp query                          # All diagnostics
@@ -93,6 +105,8 @@ interface CLIArgs {
   command: Command;
   installLang: string;
   solution: string;
+  manifest: string;
+  project: string;
   timeout: number;
   quietPeriod: number;
   format: string;
@@ -113,6 +127,8 @@ function parseArgs(): CLIArgs {
     command: "oneshot",
     installLang: "",
     solution: "",
+    manifest: "",
+    project: "",
     timeout: 60000,
     quietPeriod: 5000,
     format: "compact",
@@ -151,6 +167,14 @@ function parseArgs(): CLIArgs {
       case "--solution":
       case "-s":
         result.solution = nextArg || "";
+        i++;
+        break;
+      case "--manifest":
+        result.manifest = nextArg || "";
+        i++;
+        break;
+      case "--project":
+        result.project = nextArg || "";
         i++;
         break;
       case "--timeout":
@@ -347,9 +371,10 @@ async function main() {
   }
 
   switch (args.command) {
-    case "serve":
-      if (!args.solution) {
-        error("--solution is required for serve command");
+    case "serve": {
+      const manifestPath = args.solution || args.manifest || args.project;
+      if (!manifestPath) {
+        error("--solution, --manifest, or --project is required for serve command");
       }
       if (args.logLevel) {
         const VALID = ["error", "warn", "info", "debug"] as const;
@@ -359,12 +384,18 @@ async function main() {
           error(`Invalid --log-level "${args.logLevel}". Valid: error, warn, info, debug`);
         }
       }
+      const lang = detectLanguage(manifestPath);
+      // Use language-specific default port if user didn't explicitly set --port
+      const port = process.argv.includes("--port") || process.argv.includes("-p")
+        ? args.port
+        : (await import("./src/core/language")).getLanguageConfig(lang).defaultPort;
       await serve({
-        solution: args.solution,
-        port: args.port,
-        omnisharpPath: args.omnisharpPath,
+        manifestPath,
+        port,
+        language: lang,
       });
       break;
+    }
 
     case "query": {
       const result = await query({

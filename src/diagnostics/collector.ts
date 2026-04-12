@@ -4,17 +4,35 @@ import {
   type LSPClientOptions,
 } from "../core/types";
 import { existsSync } from "fs";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
 import { DiagnosticsStore } from "./store";
+
+/** Options for one-shot C# diagnostics collection (backward-compatible shape). */
+export interface CollectorOptions {
+  solutionPath: string;
+  omnisharpPath: string;
+  timeout: number;
+  quietPeriod: number;
+}
 
 export class DiagnosticsCollector {
   private client: LSPClient;
   private store: DiagnosticsStore;
-  private options: LSPClientOptions;
+  private options: CollectorOptions;
 
-  constructor(options: LSPClientOptions) {
+  constructor(options: CollectorOptions) {
     this.options = options;
-    this.client = new LSPClient(options);
+    // Map legacy collector options to new LSPClientOptions
+    const lspOptions: LSPClientOptions = {
+      manifestPath: options.solutionPath,
+      serverBinary: options.omnisharpPath,
+      serverArgs: ["-lsp", "-s", options.solutionPath],
+      languageId: "csharp",
+      rootUri: `file://${dirname(options.solutionPath)}`,
+      timeout: options.timeout,
+      quietPeriod: options.quietPeriod,
+    };
+    this.client = new LSPClient(lspOptions);
     this.store = new DiagnosticsStore(options.solutionPath);
   }
 

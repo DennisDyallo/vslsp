@@ -10,7 +10,8 @@ import { map } from "./src/code-mapping/mapper";
 import { matchFilePath, calculateSummary } from "./src/core/types";
 import { collectRustDiagnostics } from "./src/diagnostics/rust";
 import { collectTsDiagnostics } from "./src/diagnostics/typescript";
-import { DEFAULT_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
+import { DEFAULT_PORT, DEFAULT_TS_PORT, DEFAULT_RUST_PORT, DEFAULT_OMNISHARP, DEFAULT_VSLSP } from "./src/core/defaults";
+import { detectLanguage, getLanguageConfig, type DaemonLanguage } from "./src/core/language";
 import { setLogLevel, getLogLevel, log } from "./src/core/logger";
 import pkg from "./package.json";
 
@@ -475,31 +476,50 @@ server.registerTool(
 server.registerTool(
   "get_diagnostics_summary",
   {
-    title: "Get C# Diagnostics Summary",
+    title: "Get Diagnostics Summary",
     description:
-      "Get a quick count of C# compilation diagnostics (errors, warnings, info, hints). " +
+      "Get a quick count of compilation diagnostics (errors, warnings, info, hints) for C#, TypeScript, or Rust. " +
       "Call this first to check whether there are any errors before deciding to pull full detail with get_diagnostics. " +
-      "If summary.errors === 0 you can skip get_diagnostics entirely.",
+      "If summary.errors === 0 you can skip get_diagnostics entirely. " +
+      "When use_daemon is true (or a daemon port is provided), queries the running daemon's summary endpoint — works for all languages. " +
+      "One-shot mode (no daemon) is C#-only.",
     inputSchema: {
-      solution: z.string().describe("Absolute path to .sln file"),
-      use_daemon: z.boolean().optional().default(false).describe("Query running daemon instead of one-shot analysis"),
-      port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port (only used with use_daemon)"),
+      solution: z.string().optional().describe("C#: absolute path to .sln file. Provide this OR manifest OR project."),
+      manifest: z.string().optional().describe("Rust: path to Cargo.toml or directory containing one. Provide this OR solution OR project."),
+      project: z.string().optional().describe("TypeScript: path to tsconfig.json or directory containing one. Provide this OR solution OR manifest."),
+      use_daemon: z.boolean().optional().default(false).describe("Query running daemon instead of one-shot analysis. Required for TypeScript and Rust."),
+      port: z.number().optional().describe("Daemon port. Defaults: C#=7850, TS=7851, Rust=7852. Only used with use_daemon."),
     },
     annotations: {
-      title: "Get C# Diagnostics Summary",
+      title: "Get Diagnostics Summary",
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false,
     },
   },
-  async ({ solution, use_daemon, port }) => {
+  async ({ solution, manifest, project, use_daemon, port }) => {
     try {
+      const manifestPath = solution || manifest || project;
+      if (!manifestPath) {
+        return err("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
+      }
+      if ([solution, manifest, project].filter(Boolean).length > 1) {
+        return err("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
+      }
+
       if (use_daemon) {
-        const result = await query({ port, summary: true });
+        const lang = detectLanguage(manifestPath);
+        const resolvedPort = port ?? getLanguageConfig(lang).defaultPort;
+        const result = await query({ port: resolvedPort, summary: true });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result.data, null, 2) }],
         };
+      }
+
+      // One-shot mode: C#-only
+      if (!solution) {
+        return err("One-shot diagnostics summary (without daemon) is only supported for C#. Use use_daemon: true for TypeScript and Rust.");
       }
 
       const collector = new DiagnosticsCollector({
@@ -632,14 +652,17 @@ server.registerTool(
   {
     title: "Start Diagnostics Daemon",
     description:
-      "Start a persistent OmniSharp daemon for a .NET solution. " +
+      "Start a persistent diagnostics daemon for a C#, TypeScript, or Rust project. " +
+      "Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript). " +
       "Required before calling verify_changes — the daemon enables dry-run compilation without writing to disk. " +
       "Also speeds up repeated get_diagnostics calls (use use_daemon=true). " +
       "After calling this, poll get_daemon_status until ready=true before using verify_changes. " +
-      "First startup takes 15–90s depending on solution size. Daemon persists across tool calls.",
+      "First startup takes 15–90s depending on project size. Daemon persists across tool calls.",
     inputSchema: {
-      solution: z.string().describe("Absolute path to .sln file"),
-      port: z.number().optional().default(DEFAULT_PORT).describe("HTTP port for daemon"),
+      solution: z.string().optional().describe("C#: absolute path to .sln file"),
+      manifest: z.string().optional().describe("Rust: path to Cargo.toml or directory containing one"),
+      project: z.string().optional().describe("TypeScript: path to tsconfig.json or directory containing one"),
+      port: z.number().optional().describe("HTTP port for daemon. Defaults: C#=7850, TS=7851, Rust=7852"),
     },
     annotations: {
       title: "Start Diagnostics Daemon",
@@ -649,20 +672,32 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ solution, port }) => {
+  async ({ solution, manifest, project, port }) => {
     try {
-      log("info", "start_daemon", { solution, port });
+      const manifestPath = solution || manifest || project;
+      if (!manifestPath) {
+        return err("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
+      }
+      if ([solution, manifest, project].filter(Boolean).length > 1) {
+        return err("Provide exactly one of: solution (C#), manifest (Rust), or project (TypeScript).");
+      }
+
+      const lang = detectLanguage(manifestPath);
+      const resolvedPort = port ?? getLanguageConfig(lang).defaultPort;
+
+      log("info", "start_daemon", { manifestPath, lang, port: resolvedPort });
       // Check if daemon is already running
       try {
-        const existing = await status(port);
-        return ok({ status: "already_running", port, solution: existing.solution, ready: existing.ready });
+        const existing = await status(resolvedPort);
+        return ok({ status: "already_running", port: resolvedPort, solution: existing.solution, ready: existing.ready });
       } catch {
         // Not running, proceed to start
       }
 
       // Spawn daemon as detached subprocess using absolute path (avoids PATH issues in MCP context)
       // Forward --log-level so the daemon writes structured logs at the same level as the MCP server
-      const spawnArgs = [DEFAULT_VSLSP, "serve", "--solution", solution, "--port", String(port)];
+      const flag = lang === "csharp" ? "--solution" : lang === "rust" ? "--manifest" : "--project";
+      const spawnArgs = [DEFAULT_VSLSP, "serve", flag, manifestPath, "--port", String(resolvedPort)];
       const lvl = getLogLevel();
       if (lvl !== "error") spawnArgs.push("--log-level", lvl);
       // Explicitly pass process.env — Bun compiled binaries do not always propagate
@@ -678,10 +713,10 @@ server.registerTool(
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       try {
-        const result = await status(port);
-        return ok({ status: "started", port, solution: result.solution, ready: result.ready });
+        const result = await status(resolvedPort);
+        return ok({ status: "started", port: resolvedPort, solution: result.solution, ready: result.ready });
       } catch {
-        return ok({ status: "starting", port, solution, ready: false, message: "Initial analysis in progress. Poll get_daemon_status until ready=true." });
+        return ok({ status: "starting", port: resolvedPort, solution: manifestPath, ready: false, message: "Initial analysis in progress. Poll get_daemon_status until ready=true." });
       }
     } catch (e) {
       log("error", "tool error", { tool: "start_daemon", message: e instanceof Error ? e.message : String(e) });
@@ -696,8 +731,9 @@ server.registerTool(
     title: "Get Daemon Status",
     description:
       "Check daemon status. Poll this after start_daemon until ready=true before calling verify_changes. " +
-      "ready=true means OmniSharp has fully loaded the solution and diagnostics are live. " +
-      "updateCount increments each time OmniSharp processes a file change — use it to detect when analysis has settled.",
+      "ready=true means the language server has fully loaded the project and diagnostics are live. " +
+      "updateCount increments each time the server processes a file change — use it to detect when analysis has settled. " +
+      "Default port 7850 (C#) — use 7851 for TypeScript or 7852 for Rust.",
     inputSchema: {
       port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port to check"),
     },
@@ -728,7 +764,8 @@ server.registerTool(
     title: "Stop Diagnostics Daemon",
     description:
       "Stop the running vslsp diagnostics daemon. " +
-      "Use when done with a session or to restart with a different solution.",
+      "Use when done with a session or to restart with a different project. " +
+      "Default port 7850 (C#) — use 7851 for TypeScript or 7852 for Rust.",
     inputSchema: {
       port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port"),
     },
@@ -757,9 +794,11 @@ server.registerTool(
   {
     title: "Notify File Changed",
     description:
-      "Tell the running daemon a .cs file changed so it re-analyzes. " +
+      "Tell the running daemon a source file changed so it re-analyzes. " +
+      "Works for C#, TypeScript, and Rust projects. " +
       "If content is provided, updates in-memory only (no disk read). " +
-      "If omitted, daemon reads the file from disk.",
+      "If omitted, daemon reads the file from disk. " +
+      "Default port 7850 (C#) — use 7851 for TypeScript or 7852 for Rust.",
     inputSchema: {
       file: z.string().describe("Absolute path to the changed source file"),
       content: z.string().optional().describe("New file content for in-memory update. Omit to read from disk."),
@@ -792,11 +831,13 @@ server.registerTool(
     description:
       "Dry-run: send proposed code to the daemon WITHOUT writing to disk. " +
       "Returns compilation diagnostics for the proposed state, then reverts. " +
+      "Works for C#, TypeScript, and Rust projects. " +
       "Supports multiple files for cross-file refactorings. " +
-      "REQUIRES a running daemon (call start_daemon first).",
+      "REQUIRES a running daemon (call start_daemon first). " +
+      "Default port 7850 (C#) — use 7851 for TypeScript or 7852 for Rust.",
     inputSchema: {
       changes: z.array(z.object({
-        file: z.string().describe("Absolute path to .cs file"),
+        file: z.string().describe("Absolute path to source file"),
         content: z.string().describe("Proposed file content"),
       })).describe("Files to verify"),
       settle_ms: z.number().optional().default(2000).describe("Wait after last OmniSharp update before collecting results"),
@@ -889,10 +930,11 @@ server.registerTool(
   {
     title: "Find Symbol",
     description:
-      "Search for symbols by name in a C# solution using the running OmniSharp daemon. " +
+      "Search for symbols by name in a C#, TypeScript, or Rust project using the running daemon. " +
       "Returns matching classes, methods, interfaces, fields, and properties with their " +
       "file locations and line numbers. REQUIRES a running daemon (call start_daemon first). " +
-      "Use this instead of grep to find type definitions and method declarations.",
+      "Use this instead of grep to find type definitions and method declarations. " +
+      "Default port 7850 (C#) — use 7851 for TypeScript or 7852 for Rust.",
     inputSchema: {
       query: z.string().describe("Symbol name or partial name to search for"),
       kind: z.enum(["class", "method", "interface", "field", "property", "enum", "struct", "constructor", "namespace", "all"])
@@ -927,11 +969,12 @@ server.registerTool(
   {
     title: "Find Usages",
     description:
-      "Find all references/usages of a symbol in a C# solution. " +
+      "Find all references/usages of a symbol in a C#, TypeScript, or Rust project. " +
       "Provide either file+line+column for a precise lookup, or symbol name for a convenience lookup " +
       "(chains through workspace/symbol to resolve the location first). " +
       "Returns the definition location and all usage locations. " +
-      "REQUIRES a running daemon (call start_daemon first).",
+      "REQUIRES a running daemon (call start_daemon first). " +
+      "Default port 7850 (C#) — use 7851 for TypeScript or 7852 for Rust.",
     inputSchema: {
       file: z.string().optional().describe("Absolute path to the file containing the symbol"),
       line: z.number().optional().describe("1-indexed line number of the symbol"),

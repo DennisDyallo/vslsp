@@ -33,10 +33,14 @@ export interface DiagnosticsResult {
 }
 
 export interface LSPClientOptions {
-  solutionPath: string;
-  omnisharpPath: string;
+  manifestPath: string;      // was solutionPath — .sln, Cargo.toml, or tsconfig.json
+  serverBinary: string;      // was omnisharpPath — absolute path to LSP server binary
+  serverArgs: string[];      // arguments to pass to the LSP server
+  languageId: string;        // LSP languageId (e.g. "csharp", "typescript", "rust")
+  rootUri: string;           // pre-computed file:// URI for workspace root
   timeout: number;
-  quietPeriod: number; // ms to wait after last diagnostic before considering scan complete
+  quietPeriod: number;       // ms to wait after last diagnostic before considering scan complete
+  initializationOptions?: object; // LSP initializationOptions (e.g. tsserver config)
 }
 
 export function severityToString(severity: DiagnosticSeverity | undefined): DiagnosticEntry["severity"] {
