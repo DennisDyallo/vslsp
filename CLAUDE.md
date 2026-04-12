@@ -1,6 +1,6 @@
 # vslsp — Agent Reference
 
-MCP server version: **1.8.0** | Tools: **10** | Languages: C#, Rust, TypeScript
+MCP server version: **1.9.0** | Tools: **10** | Languages: C#, Rust, TypeScript
 
 ---
 
@@ -92,8 +92,12 @@ The daemon applies changes in-memory, waits `settle_ms` for diagnostics to stabi
 
 ```
 1. get_code_structure({ path: "/path/to/crate" })   ← understand layout
-2. Edit files on disk
-3. get_diagnostics({ manifest: "/path/to/Cargo.toml" })
+2. start_daemon({ manifest: "/path/to/Cargo.toml" })  ← optional: enables find_symbol/find_usages
+3. poll get_daemon_status({ port: 7852 }) until ready === true
+4. find_symbol({ query: "MyStruct", port: 7852 })   ← find definitions
+5. find_usages({ symbol: "MyStruct", port: 7852 })  ← find all references
+6. Edit files on disk
+7. get_diagnostics({ manifest: "/path/to/Cargo.toml" })
 ```
 
 `manifest` can be the path to `Cargo.toml` or the directory containing it.
@@ -106,8 +110,12 @@ Optional params: `package` (workspace member name), `file` (filter to one file),
 
 ```
 1. get_code_structure({ path: "/path/to/project" })   ← understand layout
-2. Edit files on disk
-3. get_diagnostics({ project: "/path/to/tsconfig.json" })
+2. start_daemon({ project: "/path/to/tsconfig.json" })  ← optional: enables find_symbol/find_usages
+3. poll get_daemon_status({ port: 7851 }) until ready === true
+4. find_symbol({ query: "MyClass", port: 7851 })     ← find definitions
+5. find_usages({ symbol: "MyClass", port: 7851 })    ← find all references
+6. Edit files on disk
+7. get_diagnostics({ project: "/path/to/tsconfig.json" })
 ```
 
 `project` can be the path to `tsconfig.json` or the directory containing it. Optional `file` param filters to one file.
@@ -147,11 +155,19 @@ get_diagnostics(solution | manifest | project, file?, severity?, limit?, ...)
   C#-only: timeout?, quiet_period?, use_daemon?, port?
   Rust-only: package?, all_targets?
 
-get_diagnostics_summary(solution, use_daemon?, port?)
+get_diagnostics_summary(solution | manifest | project, use_daemon?, port?)
   → { errors, warnings, info, hints }
-  C# only. Call this first — tiny response, tells you whether to run full diagnostics.
+  Call this first — tiny response, tells you whether to run full diagnostics.
+  With use_daemon: works for all languages. One-shot: C# only.
 
-start_daemon(solution, port?)        → { status, port, solution, ready }
+start_daemon(solution | manifest | project, port?)
+  → { status, port, solution, ready }
+  Provide exactly one of:
+    solution: C# — absolute path to .sln file
+    manifest: Rust — path to Cargo.toml
+    project:  TypeScript — path to tsconfig.json
+  Port defaults: C#=7850, TypeScript=7851, Rust=7852
+
 get_daemon_status(port?)             → { status, ready, updateCount, solution }
 stop_daemon(port?)                   → { status, port }
 
@@ -183,7 +199,7 @@ get_code_structure(path, language?, depth?, file_filter?, max_files?, format?, v
                "all"     — includes private/protected — use for debugging internal classes
 ```
 
-### Navigation (C# only — requires running daemon)
+### Navigation (all languages — requires running daemon)
 
 ```
 find_symbol(query, kind?, limit?, port?)
@@ -281,9 +297,10 @@ Every member always emits all fields (no nulls):
 
 | File | Owns |
 |------|------|
-| `mcp.ts` | All 8 MCP tool registrations, tool schemas, version string |
+| `mcp.ts` | All 10 MCP tool registrations, tool schemas, version string |
 | `vslsp.ts` | CLI entry point, `install-mapper` command |
 | `src/core/types.ts` | `DiagnosticsResult`, `DiagnosticEntry`, shared types |
+| `src/core/language.ts` | `LanguageConfig`, `detectLanguage`, per-language daemon configs |
 | `src/core/defaults.ts` | `DEFAULT_PORT`, `DEFAULT_VSLSP`, `DEFAULT_OMNISHARP`, binary paths |
 | `src/diagnostics/collector.ts` | OmniSharp LSP session, C# diagnostics collection |
 | `src/diagnostics/client.ts` | HTTP client for daemon (query/notify/stop/status) |
