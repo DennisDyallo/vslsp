@@ -364,6 +364,32 @@ function resolveManifestPath(solution?: string, manifest?: string, project?: str
   return paths[0]!;
 }
 
+/**
+ * Wait for the daemon's diagnostics to settle after a change.
+ * Polls updateCount via /status — once it increments and then stays stable
+ * for settle_ms, returns. Used by get_diagnostics, get_diagnostics_summary,
+ * notify_file_changed, and verify_changes.
+ */
+async function waitForSettle(port: number, settleMs: number, timeoutMs: number = 30000): Promise<void> {
+  if (settleMs <= 0) return;
+  const initial = await status(port);
+  const startCount = initial.updateCount;
+  const deadline = Date.now() + timeoutMs;
+  let lastCount = startCount;
+  let lastChangeAt = Date.now();
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200));
+    const s = await status(port);
+    if (s.updateCount !== lastCount) {
+      lastCount = s.updateCount;
+      lastChangeAt = Date.now();
+    }
+    // Settled: updateCount changed at least once and has been stable for settleMs
+    if (lastCount > startCount && Date.now() - lastChangeAt >= settleMs) return;
+  }
+}
+
 /** Enrich raw errors with agent-actionable guidance for common OS error patterns. */
 function enrichError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -424,6 +450,11 @@ server.registerTool(
       quiet_period: z.number().optional().default(5000).describe("C# only. Wait after last diagnostic before analysis is complete."),
       use_daemon: z.boolean().optional().default(false).describe("C# only. Query running daemon instead of one-shot analysis."),
       port: z.number().optional().default(DEFAULT_PORT).describe("C# only. Daemon port (only used with use_daemon)."),
+      settle_ms: z.number().optional().default(0).describe(
+        "Daemon only. Wait for diagnostics to stabilize before reading results. " +
+        "Set to 2000–3000 after writing files to avoid stale results. " +
+        "0 (default) reads immediately — use when no recent changes were made."
+      ),
       // === Rust-only (ignored for C#/TypeScript): ===
       package: z.string().optional().describe("Rust only. Specific package name in a workspace."),
       all_targets: z.boolean().optional().default(false).describe("Rust only. Include tests, examples, and benches."),
@@ -439,7 +470,7 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ solution, manifest, project, file, severity, limit, timeout, quiet_period, use_daemon, port, package: rustPackage, all_targets }) => {
+  async ({ solution, manifest, project, file, severity, limit, timeout, quiet_period, use_daemon, port, settle_ms, package: rustPackage, all_targets }) => {
     try {
       // --- Rust ---
       if (manifest) {
@@ -458,6 +489,7 @@ server.registerTool(
       // --- C# ---
       log("info", "get_diagnostics", { solution, use_daemon, file });
       if (use_daemon) {
+        if (settle_ms > 0) await waitForSettle(port, settle_ms);
         const raw = await query({ port, file, summary: false });
         const result = applyDiagnosticsFilters(raw.data, severity, limit);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
@@ -503,6 +535,10 @@ server.registerTool(
       project: z.string().optional().describe("TypeScript: path to tsconfig.json or directory containing one. Provide this OR solution OR manifest."),
       use_daemon: z.boolean().optional().default(false).describe("Query running daemon instead of one-shot analysis. Required for TypeScript and Rust."),
       port: z.number().optional().describe("Daemon port. Defaults: C#=7850, TS=7851, Rust=7852. Only used with use_daemon."),
+      settle_ms: z.number().optional().default(0).describe(
+        "Daemon only. Wait for diagnostics to stabilize before reading. " +
+        "Set to 2000–3000 after writing files to avoid stale results."
+      ),
     },
     annotations: {
       title: "Get Diagnostics Summary",
@@ -512,13 +548,14 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ solution, manifest, project, use_daemon, port }) => {
+  async ({ solution, manifest, project, use_daemon, port, settle_ms }) => {
     try {
       const manifestPath = resolveManifestPath(solution, manifest, project);
 
       if (use_daemon) {
         const lang = detectLanguage(manifestPath);
         const resolvedPort = port ?? getLanguageConfig(lang).defaultPort;
+        if (settle_ms > 0) await waitForSettle(resolvedPort, settle_ms);
         const result = await query({ port: resolvedPort, summary: true });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result.data, null, 2) }],
@@ -799,10 +836,17 @@ server.registerTool(
       "Works for C#, TypeScript, and Rust projects. " +
       "If content is provided, updates in-memory only (no disk read). " +
       "If omitted, daemon reads the file from disk. " +
+      "Pass settle_ms (e.g. 3000) to wait for the LSP server to finish reanalyzing before returning — " +
+      "without this, a subsequent get_diagnostics call may return stale results. " +
       "Default port 7850 (C#) — use 7851 for TypeScript or 7852 for Rust.",
     inputSchema: {
       file: z.string().describe("Absolute path to the changed source file"),
       content: z.string().optional().describe("New file content for in-memory update. Omit to read from disk."),
+      settle_ms: z.number().optional().default(0).describe(
+        "Wait for diagnostics to stabilize after notifying. " +
+        "Set to 2000–3000 when you plan to query diagnostics immediately after. " +
+        "0 (default) returns immediately — fast but subsequent diagnostics may be stale."
+      ),
       port: z.number().optional().default(DEFAULT_PORT).describe("Daemon port"),
     },
     annotations: {
@@ -813,9 +857,12 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ file, content, port }) => {
+  async ({ file, content, settle_ms, port }) => {
     try {
       const result = await notify({ port, file, content });
+      if (settle_ms > 0) {
+        await waitForSettle(port, settle_ms);
+      }
       return ok({ ...result });
     } catch (e) {
       return err(enrichError(e));
@@ -864,22 +911,8 @@ server.registerTool(
         paths.push(c.file);
       }
 
-      // 2. Wait for OmniSharp to settle (poll updateCount via status())
-      const initial = await status(port);
-      const startCount = initial.updateCount;
-      const deadline = Date.now() + timeout_ms;
-      let lastCount = startCount;
-      let lastChangeAt = Date.now();
-
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 200));
-        const s = await status(port);
-        if (s.updateCount !== lastCount) {
-          lastCount = s.updateCount;
-          lastChangeAt = Date.now();
-        }
-        if (lastCount > startCount && Date.now() - lastChangeAt >= settle_ms) break;
-      }
+      // 2. Wait for LSP server to settle
+      await waitForSettle(port, settle_ms, timeout_ms);
 
       // 3. Query diagnostics
       const result = await query({ port, summary: false });

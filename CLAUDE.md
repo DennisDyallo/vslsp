@@ -21,9 +21,11 @@ For Rust/TypeScript, `get_diagnostics` IS the summary (already compact when clea
 
 | Language | Pre-write check | Post-write check |
 |----------|----------------|-----------------|
-| **C#** | `verify_changes` (daemon required) | `get_diagnostics({ solution, severity: "error", limit: 20 })` |
+| **C#** | `verify_changes` (daemon required) | `get_diagnostics({ solution, severity: "error", limit: 20, use_daemon: true, settle_ms: 3000 })` |
 | **Rust** | — (no dry-run) | `get_diagnostics({ manifest, severity: "error" })` |
 | **TypeScript** | — (no dry-run) | `get_diagnostics({ project, severity: "error" })` |
+
+> **Avoiding stale diagnostics:** After writing files, always pass `settle_ms: 3000` to `notify_file_changed` or `get_diagnostics` (daemon mode). Without it, the LSP server may not have finished reanalyzing and you'll get stale results.
 
 ### Step 3 — understand unfamiliar code (use sparingly, always filter)
 
@@ -53,8 +55,8 @@ The C# daemon enables **dry-run compilation** — check whether edits compile *b
 3. verify_changes({ changes: [{ file: "/abs/path/File.cs", content: "..." }] })
    → returns DiagnosticsResult + verified_files; reverted: true means changes were not kept
 4. If clean: write files to disk
-5. notify_file_changed({ file: "/abs/path/File.cs" }) for each written file
-6. get_diagnostics({ solution: "/abs/path/Project.sln" }) to confirm final state
+5. notify_file_changed({ file: "/abs/path/File.cs", settle_ms: 3000 }) for each written file
+6. get_diagnostics({ solution: "/abs/path/Project.sln", use_daemon: true }) to confirm final state
 ```
 
 > **verify_changes requires a running, ready daemon.** If you skip steps 1–2, it will error. The daemon persists across calls — you only need to start it once per session.
@@ -152,10 +154,11 @@ get_diagnostics(solution | manifest | project, file?, severity?, limit?, ...)
             "error" = errors only; "warning" = errors + warnings; default: all
   limit:    max total diagnostics to return (e.g. 20). Applied after severity filter.
 
-  C#-only: timeout?, quiet_period?, use_daemon?, port?
+  C#-only: timeout?, quiet_period?, use_daemon?, port?, settle_ms?
+  settle_ms: daemon only — wait for diagnostics to stabilize (2000–3000 after writes)
   Rust-only: package?, all_targets?
 
-get_diagnostics_summary(solution | manifest | project, use_daemon?, port?)
+get_diagnostics_summary(solution | manifest | project, use_daemon?, port?, settle_ms?)
   → { errors, warnings, info, hints }
   Call this first — tiny response, tells you whether to run full diagnostics.
   With use_daemon: works for all languages. One-shot: C# only.
@@ -171,8 +174,9 @@ start_daemon(solution | manifest | project, port?)
 get_daemon_status(port?)             → { status, ready, updateCount, solution }
 stop_daemon(port?)                   → { status, port }
 
-notify_file_changed(file, content?, port?)
+notify_file_changed(file, content?, settle_ms?, port?)
   → { ok, file }   content = in-memory update; omit to read from disk
+  settle_ms: wait for diagnostics to stabilize (2000–3000 recommended after writes)
 
 verify_changes(changes[{file, content}], settle_ms?, timeout_ms?, port?)
   → DiagnosticsResult + { verified_files, reverted: true }
