@@ -197,3 +197,59 @@ human reading or runtime traces take over.
 
 *Source: Engineer subagent investigation of `OtpHidProtocol.WaitForReadyToReadAsync`
 timeout bug, April 2026. 45 tool calls, 96k tokens, ~9 minutes.*
+
+---
+
+## Post-v1.8.0 Evaluation (April 2026)
+
+User validation after deploying `find_symbol`, `find_usages`, and `visibility: "all"`.
+
+### What shipped and works
+
+| Test | Result |
+|------|--------|
+| Tool count | 10 tools (was 8) — `find_symbol` and `find_usages` added |
+| `find_symbol` for `WaitForReadyToReadAsync` | Found in 1 call: `OtpHidProtocol.cs:151`, container `OtpHidProtocol` |
+| `find_usages` for `WaitForReadyToReadAsync` | Definition (line 151) + 1 usage (line 132 in `ReadFrameJavaStyleAsync`) — exactly right |
+| `get_code_structure` with `visibility: "all"` | **Parameter accepted but 0 methods returned** for `internal sealed class OtpHidProtocol` |
+
+### Verdict
+
+`find_symbol` and `find_usages` are excellent. The Engineer subagent that debugged
+the HID timeout bug needed 3 grep calls to trace the call chain `WriteUpdateAsync →
+SendAndReceiveAsync → WaitForReadyToReadAsync`. With the new tools, that's a single
+`find_usages` call — definition + all callers in one response, with file paths and
+line numbers. This is a meaningful improvement.
+
+`visibility: "all"` on `get_code_structure` is **still broken**. The parameter is
+accepted without error, but `OtpHidProtocol` still shows 0 methods at
+`depth: "signatures"`. The Roslyn mapper is still filtering to public members even
+when `visibility: "all"` is passed. The type itself shows up (it's `internal`), but
+its methods (`WaitForReadyToReadAsync`, `SendFrameAsync`, `ReadFeatureReport`, etc.)
+are all dropped.
+
+### Impact assessment
+
+The two new navigation tools cover the most painful gap from the debugging session.
+The visibility fix remains open but is lower-impact now that `find_symbol` can locate
+any method regardless of access modifier — the workaround is `find_symbol` + `Read`
+instead of `get_code_structure`.
+
+### Updated proposal status
+
+| Proposal | Status |
+|----------|--------|
+| **P0**: `visibility: "all"` in `get_code_structure` | **Not yet working** — parameter accepted, members still filtered |
+| **P1**: `find_symbol` | Shipped and working |
+| **P2**: `find_usages` | Shipped and working |
+| **P3**: `search_code` (semantic subtree) | Not implemented (low priority, as expected) |
+
+### Root cause hypothesis for P0
+
+The CSharpMapper binary was rebuilt during development and tested successfully
+(14 methods default vs 25 methods with `--visibility all` on the same `Otp/`
+directory). The issue may be that the MCP server's `mapper.ts` passthrough has
+a condition that only sends `--visibility all` when `lang === "csharp"` — but
+if `language` is omitted and auto-detection returns a different result, or the
+`depth: "signatures"` filter strips children after the mapper returns them, the
+parameter may not reach the binary. Needs investigation.

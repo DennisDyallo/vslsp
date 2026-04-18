@@ -1,134 +1,120 @@
 # Handoff — main
 
-**Date:** 2026-04-10
+**Date:** 2026-04-18
 **Branch:** main
-**Last commit:** 65a9cbf fix: install-mapper URL missing v-prefix in version tag
+**Last commit:** 5677fa0 chore: bump version to 1.9.1
 
 ---
 
 ## Session Summary
 
-Two-day session (Apr 9–10). Full AX overhaul from v1.5.3 → v1.7.5 across eight releases. The session built the AX constitution, audited every tool against it twice, fixed every gap, and closed two latent install bugs discovered during live upgrade testing.
+Fixed stale diagnostics race condition in daemon mode. When an agent wrote a file and immediately queried diagnostics, the daemon store returned old results because the LSP server hadn't finished reanalyzing. Root cause: `notify_file_changed` returned instantly and `get_diagnostics` read the store without waiting.
+
+**Fix:** Extracted `waitForSettle()` helper from `verify_changes` (which already had correct settle logic) and wired it into `notify_file_changed`, `get_diagnostics`, and `get_diagnostics_summary` via a new `settle_ms` parameter. Live-tested against OmniSharp daemon — confirmed immediate query returns stale `errors: 0`, while query with settle returns correct `errors: 1`.
+
+Code-reviewed via 5 parallel Sonnet agents + Haiku scorers. No issues scored 80+. One minor JSDoc fix applied during review.
 
 **Release arc:**
-- **v1.6.0** — AX constitution (`docs/AX.md`), `uninstall-mapper`, HTTP behavior tests
-- **v1.7.0** — `depth` default flipped to `"signatures"`, `withDiagnosticsAxWarning`, `enrichError`, 13 AX ratchet tests
-- **v1.7.1** — `vslsp --version` flag
-- **v1.7.2** — `toTextFormat`/`toYamlFormat`; depth/filters apply to all formats
-- **v1.7.3** — AX format parity: single-file warning uses actual serialized size per format
-- **v1.7.4** — macOS 15 Sequoia signing fix: `macos_sign()` in `install.sh`
-- **v1.7.5** — `install-mapper` URL v-prefix fix (was `1.7.4`, needed `v1.7.4`)
+- **v1.8.0** — find_symbol, find_usages, visibility param (C# only)
+- **v1.8.1** — applyDepth fix, CodeAudit fixes
+- **v1.9.0** — multi-language daemon (TS, Rust), find_symbol/find_usages for all
+- **v1.9.1** (this session) — settle_ms fix for stale diagnostics
 
 ---
 
 ## Current State
 
-### Committed Work (this session, since v1.5.3)
+### Committed Work (this session)
 
 ```
-65a9cbf fix: install-mapper URL missing v-prefix in version tag
-8fd7a05 fix: auto-sign binaries on macOS 15 Sequoia — no more Killed: 9
-b61243b chore: final handoff — v1.7.3 complete, FPA ⭐
-08995e6 fix: AX format parity — single-file warning uses actual serialized size
-e4050f5 fix: CodeAudit corrections to toTextFormat/toYamlFormat serializers
-a5e9547 fix: depth and file_filter now apply to text and yaml formats
-4285cbd feat: add --version flag; release v1.7.1
-95d2656 chore: release v1.7.0
-bc2c70a test: strengthen B5 — unconditional size assert ensures warning path always executes
-0296bea test: AX ratchet tests B5/A3b/A4b/A5+; fix F3 enrichError, F4 single-file msg, F6 param descriptions
-771afc9 fix: AX warning for unfiltered get_diagnostics responses
-8643bbc fix: flip depth default to signatures — AX G6
-ce8ca05 fix: AX constitution compliance — tool schema and runtime gaps
-dd78997 chore: release v1.6.0
-8efa6f8 test: rewrite http.test.ts with real HTTP behavior tests
-d00a1ca feat: add vslsp uninstall-mapper command
-9000913 docs: add AX constitution — canonical agent experience philosophy
+5677fa0 chore: bump version to 1.9.1
+3badb4c fix: add settle_ms to prevent stale diagnostics from daemon queries
 ```
 
 ### Uncommitted Changes
 
-None. Working tree clean.
+| File | Status |
+|------|--------|
+| `Plans/handoff.md` | Modified — this handoff document |
+| `docs/vslsp-proposals.md` | Modified — evaluation notes |
+
+### Untracked Files (session artifacts)
+
+| File | Notes |
+|------|-------|
+| `.claude/` | Claude Code session data |
+| `Plans/abstract-skipping-tarjan.md` | Prior plan artifact |
+| `Plans/splendid-seeking-kettle-agent-*.md` | Prior subagent worktree plans |
+| `Plans/swift-wondering-fountain.md` | Prior plan artifact |
+| `Plans/wondrous-imagining-frost.md` | v1.9.0 implementation plan |
 
 ### Build & Test Status
 
 - TypeScript: **clean** (`bun run tsc --noEmit`)
-- Unit: **49 pass, 0 fail**
-- E2E: **35 pass, 1 skip, 0 fail** — skip cleared by reinstalling Rust mapper
-- Released and installed: **v1.7.5** (`vslsp --version` → `1.7.5`)
-- All mappers installed: csharp ✅ typescript ✅ rust ✅
-
-### Worktree / Parallel Agent State
-
-| Worktree | Branch | Last commit | Status |
-|----------|--------|-------------|--------|
-| `.claude/worktrees/agent-a53e50a8` | `worktree-agent-a53e50a8` | `e261cf3` | ✅ Merged — prune safe |
-| `.claude/worktrees/agent-add47742` | `worktree-agent-add47742` | `d00a1ca` | ✅ Merged — prune safe |
-
-Prune: `git worktree prune`
+- E2E: **35 pass, 1 skip, 0 fail**
+- Unit: **32 pass, 0 fail**
+- Binaries built and installed: **v1.9.1** (`./vslsp --version` -> `1.9.1`)
+- Pushed to remote: **yes** (5677fa0)
 
 ---
 
 ## Readiness Assessment
 
-**Target:** AI agents (Claude Code, Cursor, Windsurf) working on C#, Rust, or TypeScript codebases who need compilation diagnostics and code structure analysis via MCP — responses must never pollute the agent's context window.
+**Target:** AI agents using vslsp MCP tools for C#, Rust, or TypeScript development who need fresh diagnostics after writing files.
 
 | Need | Status | Notes |
 |------|--------|-------|
-| Get compilation errors scoped to what matters | ✅ Working | `severity:"error"` + `limit:20` → < 10KB; warns when unfiltered > 50KB |
-| Understand codebase structure without reading files | ✅ Working | `depth:"signatures"` default; AX truncation at 200KB across all formats |
-| Dry-run compile before writing (C#) | ✅ Working | `verify_changes` with daemon; disk never touched |
-| Responses stay within context window budget | ✅ Working | Multi-file: auto-truncated + warned. Single-file: warned using actual format size |
-| Know when too large and what to do | ✅ Working | All warnings: what happened + directive + concrete example (AX standard) |
-| Install / uninstall mappers | ✅ Working | `vslsp install-mapper <lang>` + `vslsp uninstall-mapper <lang>` |
-| Query any project, any directory | ✅ Working | Stateless — `path`/`project`/`manifest`/`solution` per call |
-| AX contracts locked in CI | ✅ Working | 13 ratchet tests: A1-A6, A3b, A4b, B1-B5 (dual-bound) |
-| Version self-reporting | ✅ Working | `vslsp --version` → `1.7.5` |
-| Fresh install on macOS 15 — no manual steps | ✅ Working | `macos_sign()` strips stale Bun signature, re-signs ad-hoc |
+| Diagnostics not stale after file writes | ✅ Fixed | `settle_ms: 3000` on notify or get_diagnostics waits for LSP to finish |
+| Backward compatible | ✅ | Default `settle_ms: 0` preserves old behavior |
+| verify_changes still works | ✅ | Refactored to use shared `waitForSettle`, same behavior |
+| All 3 daemon tools support settle | ✅ | notify_file_changed, get_diagnostics, get_diagnostics_summary |
+| CLAUDE.md documents settle_ms | ✅ | Workflows, tool reference, stale diagnostics warning |
+| Code review passed | ✅ | 5-agent review, 0 issues scored 80+ |
 
-**Overall:** ⭐ **Complete** — all stated AX goals met, install works cleanly on macOS 15, all mappers functional, 13 CI ratchets. v1.7.5 released and installed.
+**Overall:** ⭐ **Complete** — stale diagnostics fix shipped as v1.9.1, live-tested, code-reviewed.
 
-**Critical next step:** None. Optional: Go mapper, Rust/TS daemon, or `git worktree prune`.
+**Critical next step:** Create GitHub release (CI will build platform binaries). Restart MCP server to pick up new `vslsp-mcp` binary.
 
 ---
 
-## What's Next (Optional / Future)
+## What's Next
 
-1. **Go mapper** — Pattern established. `GoMapper` + registry + CI matrix + `install.sh`. Carried forward since v1.5.3.
-2. **Rust/TypeScript daemon** — `verify_changes` dry-run is C#-only. Requires persistent `cargo check`/`tsc` processes.
-3. **Multi-file AX truncation calibrated per format** — JSON size used as proxy for text/yaml (conservative, always safe). True per-format calibration would require restructuring.
-4. **Prune stale worktrees** — `git worktree prune`
+### High priority
+1. **GitHub release for v1.9.1** — `bun run scripts/release.ts` or `gh release create v1.9.1`
+2. **Restart MCP server** — the running `vslsp-mcp` process is still the old binary without `settle_ms`
 
----
+### Medium priority
+3. **Real-world agent test** — use `/vslsp` skill as an agent fixing a real issue in Skattata (TS) or octo-rdt-prototype (Rust), exercising the full diagnose -> fix -> verify workflow with settle_ms
+4. **vslsp-integration skill update** — add settle_ms to the integration test patterns
 
-## Blockers & Known Issues
-
-None.
-
-**Intentional keeps:**
-- Single-file oversize warns but doesn't truncate — `depth:"full"` is opt-in, agent can use `"signatures"` instead
-- Multi-file truncation uses JSON as size proxy — always conservative (safe, never returns too much)
-- `withDiagnosticsAxWarning` warns only — preserves full diagnostic semantics
+### Optional / Future
+5. **Go mapper** — carried forward since v1.5.3
+6. **Prune stale worktrees** — `git worktree prune`
 
 ---
 
-## Key File References
+## Key Changes (v1.9.1)
 
-| File | Purpose |
-|------|---------|
-| `docs/AX.md` | AX constitution — canonical philosophy |
-| `install.sh:23-31` | `macos_sign()` — strips + re-signs on macOS 15 |
-| `vslsp.ts:237-241` | `install-mapper` URL construction with v-prefix fix |
-| `mcp.ts:99,108` | `AX_BUDGET_BYTES` (200KB), `AX_DIAG_WARN_BYTES` (50KB) |
-| `mcp.ts:110-188` | `filterCodeStructure()` — all filtering + AX truncation |
-| `mcp.ts:190-210` | `toTextFormat()` — JSON → text |
-| `mcp.ts:212-256` | `toYamlFormat()` — JSON → YAML (always-quoted strings) |
-| `mcp.ts:219-240` | `withDiagnosticsAxWarning()` — diagnostics 50KB warning |
-| `mcp.ts:285-295` | `enrichError()` — ENOENT/EACCES agent guidance |
-| `mcp.ts:464` | `depth` default `"signatures"` |
-| `mcp.ts:587-614` | Handler — format serialization + actual-size AX check |
-| `tests/e2e/mcp-server.test.ts` | 13 AX ratchet tests |
-| `tests/http.test.ts` | 16 HTTP behavior tests |
-| `vslsp.ts` | CLI — `install-mapper`, `uninstall-mapper`, `--version` |
+### New: `waitForSettle()` helper in mcp.ts
+
+```typescript
+async function waitForSettle(port, settleMs, timeoutMs = 30000): Promise<void>
+```
+
+Polls daemon `/status` `updateCount` until it increments and stabilizes for `settleMs`. Used by 4 tools: get_diagnostics, get_diagnostics_summary, notify_file_changed, verify_changes.
+
+### Modified tools
+
+| Tool | Change |
+|------|--------|
+| `notify_file_changed` | Added `settle_ms` param (default 0) |
+| `get_diagnostics` | Added `settle_ms` param (daemon mode only, default 0) |
+| `get_diagnostics_summary` | Added `settle_ms` param (daemon mode only, default 0) |
+| `verify_changes` | Refactored to use shared `waitForSettle` (same behavior) |
+
+### Known design note
+
+`settle_ms` on `get_diagnostics` only applies to the C# daemon path (`use_daemon: true`). Rust/TypeScript paths use one-shot `cargo check`/`tsc --noEmit` which always return fresh results. This is by design — documented as "Daemon only" in schema.
 
 ---
 
@@ -139,22 +125,13 @@ cd /Users/Dennis.Dyall/Code/other/vslsp
 
 # Verify
 git log --oneline -5
-git status
+./vslsp --version                    # -> 1.9.1
 bun run tsc --noEmit
-bun test tests/http.test.ts tests/diagnostics/store.test.ts tests/core/types.test.ts \
-  tests/code-mapping/mapper.test.ts tests/diagnostics/rust.test.ts \
-  tests/diagnostics/typescript.test.ts --timeout 30000
 bun test tests/e2e/mcp-server.test.ts --timeout 120000
 
-# v1.7.5 — fully operational
-vslsp --version                    # → 1.7.5
-vslsp install-mapper rust          # works — v-prefix fixed
-vslsp install-mapper typescript    # works
-
-# Install from scratch (macOS 15 compatible):
-curl -fsSL https://raw.githubusercontent.com/DennisDyallo/vslsp/main/install.sh | bash -s -- --yes
-# No Killed: 9. No manual signing. Works on macOS 13/14/15.
-
-# Clean up stale session worktrees:
-git worktree prune
+# The fix in action:
+# 1. Start daemon
+# 2. Write a file
+# 3. notify_file_changed({ file: "...", settle_ms: 3000 })  <- waits for LSP
+# 4. get_diagnostics({ solution: "...", use_daemon: true })  <- now returns fresh results
 ```
